@@ -1,0 +1,16 @@
+# ArxivReader 运行时依赖
+# 安装： python3 -m pip install -r requirements.txt
+# 目标运行环境： Python 3.9+
+
+fastapi>=0.110
+uvicorn[standard]>=0.27
+sqlalchemy>=2.0
+pydantic>=2.0
+arxiv>=2.1
+pymupdf>=1.23
+openai>=1.30
+python-multipart>=0.0.9
+
+# ---- 开发 / 测试 ----
+pytest>=7.0
+httpx>=0.27

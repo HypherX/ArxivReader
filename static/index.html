@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ArxivReader · 文献管理</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- 顶栏：品牌 / 添加论文 / 全局操作 -->
+  <header id="topbar">
+    <div class="brand"><span class="logo">📚</span><span class="bname">ArxivReader</span><span class="btag">文献管理</span></div>
+    <div class="add-box">
+      <input id="new-url" type="text" placeholder="粘贴 ArXiv 链接或 ID（如 2401.12345），回车入库…" autocomplete="off" />
+      <select id="target-folder" title="选择目标文件夹，或按规则自动归档"></select>
+      <button id="add-btn" class="primary">添加</button>
+    </div>
+    <div class="top-actions">
+      <button id="open-rules" class="ghost">归档规则</button>
+      <button id="open-settings" class="ghost">设置</button>
+    </div>
+  </header>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- 三栏主体 -->
+  <main id="layout">
+    <!-- 左：文件夹树 -->
+    <aside id="sidebar">
+      <div class="side-head">
+        <span>文件夹</span>
+        <button id="new-folder" class="mini" title="新建顶层文件夹">＋</button>
+      </div>
+      <div id="folder-all" class="folder-row all selected">
+        <span class="fname">全部论文</span><span class="count" id="all-count">0</span>
+      </div>
+      <div id="folder-tree"></div>
+    </aside>
+
+    <!-- 中：论文列表 + PDF 预览 -->
+    <section id="center">
+      <div id="list-pane">
+        <input id="search" type="text" placeholder="搜索标题 / 摘要 / 作者…" autocomplete="off" />
+        <div id="paper-list"></div>
+      </div>
+      <div id="viewer-pane">
+        <div id="viewer-empty" class="empty">选择一篇论文以预览 PDF</div>
+        <iframe id="pdf-frame" class="hidden" title="PDF 预览"></iframe>
+      </div>
+    </section>
+
+    <!-- 右：对话阅读 -->
+    <aside id="chat-pane">
+      <div id="chat-head">
+        <div id="chat-title">未选择论文</div>
+        <div class="chat-head-actions">
+          <select id="session-select" title="切换会话"></select>
+          <button id="new-session" class="mini" title="新建会话">＋</button>
+        </div>
+      </div>
+      <div id="messages">
+        <div class="empty">选择论文并开始一次对话，就论文内容向 LLM 提问。</div>
+      </div>
+      <div id="chat-input-row">
+        <textarea id="chat-input" rows="2" placeholder="就这篇论文提问…（Enter 发送，Shift+Enter 换行）"></textarea>
+        <button id="send-btn" class="primary">发送</button>
+      </div>
+    </aside>
+  </main>
+
+  <!-- 设置弹窗 -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><span>LLM 设置（OpenAI 兼容）</span><button class="mini" data-close="settings-modal">✕</button></div>
+      <div class="modal-body">
+        <label>API Base URL<input id="set-base-url" type="text" placeholder="https://api.openai.com/v1" /></label>
+        <label>API Key<input id="set-api-key" type="password" placeholder="留空表示不修改" autocomplete="off" /></label>
+        <div class="hint" id="key-hint"></div>
+        <label>模型名称<input id="set-model" type="text" placeholder="gpt-4o-mini / qwen-plus / deepseek-chat" /></label>
+        <div class="row">
+          <label>temperature<input id="set-temperature" type="number" step="0.1" min="0" max="2" /></label>
+          <label>max_tokens<input id="set-max-tokens" type="number" step="256" min="1" /></label>
+          <label>top_p<input id="set-top-p" type="number" step="0.05" min="0" max="1" /></label>
+        </div>
+        <div class="hint" id="settings-test-result"></div>
+      </div>
+      <div class="modal-foot">
+        <button id="test-llm" class="ghost">测试连接</button>
+        <span class="spacer"></span>
+        <button class="ghost" data-close="settings-modal">取消</button>
+        <button id="save-settings" class="primary">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 规则弹窗 -->
+  <div id="rules-modal" class="modal hidden">
+    <div class="modal-card wide">
+      <div class="modal-head"><span>自动归档规则</span><button class="mini" data-close="rules-modal">✕</button></div>
+      <div class="modal-body">
+        <p class="hint">入库论文若未手动指定文件夹，则按 priority 升序匹配下列启用规则，首条命中即归档；都不命中则进入 Inbox。</p>
+        <div class="rule-form">
+          <input id="rule-name" type="text" placeholder="规则名（可选）" />
+          <select id="rule-type">
+            <option value="category">分类 category</option>
+            <option value="keyword">关键词 keyword</option>
+            <option value="author">作者 author</option>
+            <option value="title">标题 title</option>
+          </select>
+          <input id="rule-pattern" type="text" placeholder="匹配值，如 cs.CL / diffusion / Bengio" />
+          <select id="rule-folder"></select>
+          <input id="rule-priority" type="number" value="100" title="priority，越小越先" />
+          <button id="add-rule" class="primary">添加规则</button>
+        </div>
+        <div id="rule-list"></div>
+      </div>
+      <div class="modal-foot">
+        <span class="spacer"></span>
+        <button class="ghost" data-close="rules-modal">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
