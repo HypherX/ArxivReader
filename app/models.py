@@ -86,6 +86,11 @@ class Paper(Base):
         return bool(self.full_text)
 
     @property
+    def text_chars(self) -> int:
+        """已缓存全文的字符数，供前端展示“入上下文”规模。"""
+        return len(self.full_text or "")
+
+    @property
     def folder_name(self) -> Optional[str]:
         return self.folder.name if self.folder else None
 

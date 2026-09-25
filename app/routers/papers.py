@@ -187,3 +187,44 @@ def get_text(paper_id: int, db: Session = Depends(database.get_db)):
         "char_count": len(paper.full_text or ""),
         "text": paper.full_text or "",
     }
+
+
+@router.post("/{paper_id}/reextract", response_model=schemas.PaperOut)
+def reextract_text(paper_id: int, db: Session = Depends(database.get_db)):
+    """重新抽取论文全文（用于入库时抽取失败 / 正文为空的论文恢复）。
+
+    若本地 PDF 存在则直接重抽；否则根据 arxiv_id 重新下载后再抽取。
+    抽取仍失败时返回 502，不覆盖已有内容。
+    """
+    paper = _get_paper_or_404(db, paper_id)
+
+    pdf_path = paper.pdf_path if (paper.pdf_path and os.path.isfile(paper.pdf_path)) else None
+    if pdf_path is None:
+        # 本地无 PDF，尝试重新下载
+        folder = db.get(Folder, paper.folder_id) if paper.folder_id else None
+        dest_dir = os.path.join(
+            config_loader.get_pdf_dir(), _safe_dirname(folder.name if folder else "Inbox")
+        )
+        try:
+            meta = arxiv_service.fetch_metadata(paper.arxiv_id)
+            downloaded = arxiv_service.download_pdf(meta, dest_dir)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("重抽时重新下载 PDF 失败（%s）：%s", paper.arxiv_id, str(exc)[:300])
+            raise HTTPException(status_code=502, detail="重新下载 PDF 失败：%s" % str(exc)[:200])
+        pdf_path = str(downloaded)
+        paper.pdf_path = pdf_path
+
+    try:
+        text, truncated = pdf_service.extract_text_for_context(pdf_path)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("重新抽取全文失败（%s）：%s", pdf_path, str(exc)[:300])
+        raise HTTPException(status_code=502, detail="抽取全文失败：%s" % str(exc)[:200])
+
+    if not text.strip():
+        raise HTTPException(status_code=502, detail="未能从 PDF 抽取到文本（可能是扫描版/图片型 PDF）")
+
+    paper.full_text = text
+    paper.text_truncated = truncated
+    db.commit()
+    db.refresh(paper)
+    return paper

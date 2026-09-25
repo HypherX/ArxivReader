@@ -175,6 +175,36 @@ def test_move_and_delete_paper(client, mock_arxiv):
     assert client.get("/api/papers/{}".format(pid)).status_code == 404
 
 
+def test_text_chars_reported(client, mock_arxiv):
+    p = client.post("/api/papers/from-arxiv", json={"url": "2409.70001"}).json()
+    assert p["has_text"] is True
+    assert p["text_chars"] == len("Full text of the paper.")
+
+
+def test_reextract_restores_full_text(client, mock_arxiv, monkeypatch):
+    # 入库时抽取失败 -> full_text 为空
+    monkeypatch.setattr(pdf_service, "extract_text_for_context",
+                        lambda path, max_chars=120000: ("", False))
+    pid = client.post("/api/papers/from-arxiv", json={"url": "2409.70002"}).json()["id"]
+    assert client.get("/api/papers/{}".format(pid)).json()["has_text"] is False
+
+    # 修复抽取后重抽 -> 全文恢复
+    monkeypatch.setattr(pdf_service, "extract_text_for_context",
+                        lambda path, max_chars=120000: ("Recovered body text.", False))
+    r = client.post("/api/papers/{}/reextract".format(pid))
+    assert r.status_code == 200, r.text
+    assert r.json()["has_text"] is True
+    assert r.json()["text_chars"] == len("Recovered body text.")
+
+
+def test_reextract_fails_when_still_empty(client, mock_arxiv, monkeypatch):
+    monkeypatch.setattr(pdf_service, "extract_text_for_context",
+                        lambda path, max_chars=120000: ("", False))
+    pid = client.post("/api/papers/from-arxiv", json={"url": "2409.70003"}).json()["id"]
+    r = client.post("/api/papers/{}/reextract".format(pid))
+    assert r.status_code == 502
+
+
 # ---------------- 规则 ----------------
 def test_rules_crud(client):
     fid = client.post("/api/folders", json={"name": "R"}).json()["id"]

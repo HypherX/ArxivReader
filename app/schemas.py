@@ -72,6 +72,7 @@ class PaperOut(BaseModel):
     folder_name: Optional[str] = None
     text_truncated: bool = False
     has_text: bool = False
+    text_chars: int = 0
     added_at: Optional[datetime.datetime] = None
 
 

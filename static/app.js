@@ -41,6 +41,101 @@
     toastTimer = setTimeout(function () { t.className = "toast hidden"; }, 3600);
   }
 
+  // ---------------- 布局持久化 ----------------
+  var LS_LAYOUT = "arxivreader.layout.v1";
+  function loadLayout() { try { return JSON.parse(localStorage.getItem(LS_LAYOUT)) || {}; } catch (e) { return {}; } }
+  function saveLayout(patch) {
+    try {
+      var cur = loadLayout();
+      for (var k in patch) { if (patch.hasOwnProperty(k)) cur[k] = patch[k]; }
+      localStorage.setItem(LS_LAYOUT, JSON.stringify(cur));
+    } catch (e) { /* localStorage 不可用时静默降级 */ }
+  }
+
+  // ---------------- Markdown 安全渲染 ----------------
+  // 策略：先整体转义 HTML，再做 Markdown 结构化替换；代码块/行内码用占位符隔离，
+  // 链接仅放行 http/https。用户与模型内容一律不可注入脚本。
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  function inlineMd(s) {
+    var codes = [];
+    s = s.replace(/`([^`]+)`/g, function (_, c) { codes.push(c); return "\u0000" + (codes.length - 1) + "\u0000"; });
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function (_, t, u) {
+      return '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + t + '</a>';
+    });
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+    s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+    s = s.replace(/\u0000(\d+)\u0000/g, function (_, i) { return "<code>" + codes[+i] + "</code>"; });
+    return s;
+  }
+  function splitRow(line) {
+    var t = line.replace(/^\s*\|/, "").replace(/\|\s*$/, "");
+    return t.split("|").map(function (c) { return inlineMd(c.trim()); });
+  }
+  function blocksToHtml(chunk) {
+    var lines = escapeHtml(chunk).split("\n");
+    var html = [], listType = null, listBuf = [], tableBuf = [];
+    function flushList() {
+      if (listType) {
+        html.push("<" + listType + ">" + listBuf.map(function (li) { return "<li>" + li + "</li>"; }).join("") + "</" + listType + ">");
+        listBuf = []; listType = null;
+      }
+    }
+    function flushTable() {
+      if (!tableBuf.length) return;
+      var rows = tableBuf.slice(); tableBuf = [];
+      var isSep = /^\s*\|?[\s:|-]+\|?\s*$/.test(rows[1] || "") && /-/.test(rows[1] || "");
+      var out = ["<table>"];
+      var startIdx = 0;
+      if (isSep) {
+        out.push("<thead><tr>" + splitRow(rows[0]).map(function (c) { return "<th>" + c + "</th>"; }).join("") + "</tr></thead>");
+        startIdx = 2;
+      }
+      out.push("<tbody>");
+      for (var r = startIdx; r < rows.length; r++) {
+        out.push("<tr>" + splitRow(rows[r]).map(function (c) { return "<td>" + c + "</td>"; }).join("") + "</tr>");
+      }
+      out.push("</tbody></table>");
+      html.push(out.join(""));
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i], m;
+      if (/^\s*\|.*\|\s*$/.test(line)) { flushList(); tableBuf.push(line); continue; }
+      flushTable();
+      if (/^\s*$/.test(line)) { flushList(); continue; }
+      if ((m = line.match(/^(#{1,6})\s+(.*)$/))) { flushList(); var lv = m[1].length; html.push("<h" + lv + ">" + inlineMd(m[2]) + "</h" + lv + ">"); continue; }
+      if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { flushList(); html.push("<hr>"); continue; }
+      if ((m = line.match(/^\s*&gt;\s?(.*)$/))) { flushList(); html.push("<blockquote>" + inlineMd(m[1]) + "</blockquote>"); continue; }
+      if ((m = line.match(/^\s*[-*+]\s+(.*)$/))) { if (listType !== "ul") { flushList(); listType = "ul"; } listBuf.push(inlineMd(m[1])); continue; }
+      if ((m = line.match(/^\s*\d+\.\s+(.*)$/))) { if (listType !== "ol") { flushList(); listType = "ol"; } listBuf.push(inlineMd(m[1])); continue; }
+      flushList();
+      html.push("<p>" + inlineMd(line) + "</p>");
+    }
+    flushList(); flushTable();
+    return html.join("");
+  }
+  function renderMarkdown(text) {
+    if (!text) return "";
+    var src = String(text).replace(/\r\n/g, "\n");
+    var parts = src.split("```"), out = [];
+    for (var pi = 0; pi < parts.length; pi++) {
+      if (pi % 2 === 1) {
+        var code = parts[pi].replace(/^[^\n]*\n/, "");
+        out.push("<pre><code>" + escapeHtml(code.replace(/\n$/, "")) + "</code></pre>");
+      } else if (parts[pi]) {
+        out.push(blocksToHtml(parts[pi]));
+      }
+    }
+    return out.join("");
+  }
+  function setMd(node, text) {
+    var wrap = el("span", { class: "md" });
+    wrap.innerHTML = renderMarkdown(text);
+    node.replaceChildren(wrap);
+  }
+
   // ---------------- API 封装 ----------------
   function req(method, url, body) {
     var opt = { method: method, headers: {} };
@@ -132,7 +227,7 @@
     }
   }
   function renderFolderSelects() {
-    [["target-folder", true], ["rule-folder", false]].forEach(function (pair) {
+    [["target-folder", true], ["rule-folder", false], ["move-folder", false]].forEach(function (pair) {
       var sel = $(pair[0]); if (!sel) return;
       var prev = sel.value; sel.replaceChildren();
       if (pair[1]) sel.appendChild(el("option", { value: "", text: "自动归档（按规则）" }));
@@ -167,10 +262,16 @@
       (p.categories || []).slice(0, 3).forEach(function (c) { badges.appendChild(el("span", { class: "badge", text: c })); });
       if (p.folder_name) badges.appendChild(el("span", { class: "badge folder", text: "📁 " + p.folder_name }));
       if (p.text_truncated) badges.appendChild(el("span", { class: "badge trunc", text: "已截断" }));
+      if (!p.has_text) badges.appendChild(el("span", { class: "badge notext", text: "⚠ 无正文" }));
+      var ops = el("div", { class: "p-ops" }, [
+        el("button", { title: "移动到文件夹", text: "📁", onclick: function (e) { e.stopPropagation(); openMoveModal(p); } }),
+        el("button", { class: "del", title: "删除论文", text: "🗑", onclick: function (e) { e.stopPropagation(); deletePaper(p); } }),
+      ]);
       var item = el("div", {
         class: "paper-item" + (state.currentPaper && state.currentPaper.id === p.id ? " active" : ""),
         "data-id": p.id,
       }, [
+        ops,
         el("div", { class: "p-title", text: p.title || p.arxiv_id }),
         el("div", { class: "p-authors", text: (p.authors || []).join(", ") || "—" }),
         badges,
@@ -184,8 +285,28 @@
     $("viewer-empty").classList.add("hidden");
     var frame = $("pdf-frame"); frame.classList.remove("hidden");
     frame.src = "/api/papers/" + p.id + "/pdf";
+    $("viewer-toolbar").classList.remove("hidden");
+    $("viewer-title").textContent = p.title || p.arxiv_id;
     $("chat-title").textContent = p.title || p.arxiv_id;
+    updateCtxStatus(p);
     loadSessions();
+  }
+
+  // 上下文状态：明确告知用户“全文/仅摘要/已截断”，避免默默降级
+  function updateCtxStatus(p) {
+    var box = $("ctx-status");
+    if (!p) { box.className = "ctx-status hidden"; box.textContent = ""; return; }
+    box.classList.remove("hidden");
+    box.replaceChildren();
+    if (p.has_text) {
+      box.className = "ctx-status ok";
+      var n = (p.text_chars || 0).toLocaleString();
+      box.appendChild(el("span", { text: "✓ 已将全文 " + n + " 字符加入对话上下文" }));
+      if (p.text_truncated) box.appendChild(el("span", { text: "（原文过长，已截断至上限）" }));
+    } else {
+      box.className = "ctx-status warn";
+      box.appendChild(el("span", { text: "⚠ 未抽取到正文，当前仅标题/摘要入上下文。可点“↻ 重抽全文”修复。" }));
+    }
   }
 
   // ---------------- 添加论文 ----------------
@@ -202,6 +323,59 @@
       return Promise.all([loadFolders(), loadPapers()]).then(function () { selectPaper(paper); });
     }).catch(function (e) { toast("入库失败：" + e.message, "err"); })
       .then(function () { btn.disabled = false; btn.textContent = "添加"; });
+  }
+
+  // ---------------- 论文操作：移动 / 删除 / 重抽全文 ----------------
+  var movingPaper = null;
+  function openMoveModal(p) {
+    movingPaper = p;
+    renderFolderSelects();
+    $("move-paper-title").textContent = p.title || p.arxiv_id;
+    var sel = $("move-folder");
+    sel.value = p.folder_id != null ? String(p.folder_id) : "";
+    $("move-modal").classList.remove("hidden");
+  }
+  function confirmMove() {
+    if (!movingPaper) return;
+    var val = $("move-folder").value;
+    if (!val) { toast("请选择目标文件夹", "err"); return; }
+    var fid = parseInt(val, 10);
+    api.patch("/api/papers/" + movingPaper.id, { folder_id: fid }).then(function (updated) {
+      $("move-modal").classList.add("hidden");
+      toast("已移动到：" + (updated.folder_name || ""), "ok");
+      if (state.currentPaper && state.currentPaper.id === updated.id) state.currentPaper = updated;
+      movingPaper = null;
+      return Promise.all([loadFolders(), loadPapers()]);
+    }).catch(function (e) { toast("移动失败：" + e.message, "err"); });
+  }
+  function deletePaper(p) {
+    if (!confirm('从库中删除《' + (p.title || p.arxiv_id) + '》？\n将同时删除本地 PDF 与其对话记录。')) return;
+    api.del("/api/papers/" + p.id).then(function () {
+      toast("已删除", "ok");
+      if (state.currentPaper && state.currentPaper.id === p.id) clearCurrentPaper();
+      return Promise.all([loadFolders(), loadPapers()]);
+    }).catch(function (e) { toast("删除失败：" + e.message, "err"); });
+  }
+  function clearCurrentPaper() {
+    state.currentPaper = null; state.sessions = []; state.currentSessionId = null;
+    $("pdf-frame").classList.add("hidden"); $("pdf-frame").removeAttribute("src");
+    $("viewer-empty").classList.remove("hidden");
+    $("viewer-toolbar").classList.add("hidden");
+    $("chat-title").textContent = "未选择论文";
+    $("session-select").replaceChildren();
+    updateCtxStatus(null);
+    renderMessages([]);
+  }
+  function reextractPaper() {
+    var p = state.currentPaper; if (!p) { toast("请先选择一篇论文", "err"); return; }
+    var btn = $("reextract-paper"); btn.disabled = true; var old = btn.textContent; btn.textContent = "重抽中…";
+    api.post("/api/papers/" + p.id + "/reextract").then(function (updated) {
+      state.currentPaper = updated;
+      updateCtxStatus(updated);
+      loadPapers();
+      toast(updated.has_text ? ("全文已重抽（" + (updated.text_chars || 0).toLocaleString() + " 字符）") : "重抽完成", "ok");
+    }).catch(function (e) { toast("重抽失败：" + e.message, "err"); })
+      .then(function () { btn.disabled = false; btn.textContent = old; });
   }
 
   // ---------------- 对话 ----------------
@@ -231,7 +405,9 @@
     if (!msgs || !msgs.length) { box.appendChild(el("div", { class: "empty", text: "开始提问吧。例如：这篇论文解决了什么问题？核心方法是什么？" })); return; }
     msgs.forEach(function (m) {
       if (m.role === "system") return;
-      box.appendChild(el("div", { class: "msg " + m.role, text: m.content }));
+      var node = el("div", { class: "msg " + m.role });
+      setMd(node, m.content);
+      box.appendChild(node);
     });
     box.scrollTop = box.scrollHeight;
   }
@@ -247,19 +423,22 @@
       input.value = "";
       var box = $("messages");
       if (box.querySelector(".empty")) box.replaceChildren();
-      box.appendChild(el("div", { class: "msg user", text: content }));
-      var ai = el("div", { class: "msg assistant pending", text: "" });
+      var userNode = el("div", { class: "msg user" }); setMd(userNode, content);
+      box.appendChild(userNode);
+      var ai = el("div", { class: "msg assistant pending" });
       box.appendChild(ai); box.scrollTop = box.scrollHeight;
 
+      var raw = "";
       state.streaming = true; $("send-btn").disabled = true;
       streamChat(sid, content, function (delta) {
-        ai.textContent += delta; box.scrollTop = box.scrollHeight;
+        raw += delta; setMd(ai, raw); box.scrollTop = box.scrollHeight;
       }, function () {
-        ai.classList.remove("pending"); state.streaming = false; $("send-btn").disabled = false;
+        ai.classList.remove("pending"); if (raw) setMd(ai, raw);
+        state.streaming = false; $("send-btn").disabled = false;
         loadSessions();
       }, function (errMsg) {
         ai.classList.remove("pending");
-        if (!ai.textContent) ai.remove();
+        if (!raw) ai.remove();
         box.appendChild(el("div", { class: "msg error", text: "出错：" + errMsg }));
         state.streaming = false; $("send-btn").disabled = false;
       });
@@ -392,6 +571,62 @@
   function toggleRule(r) { api.patch("/api/rules/" + r.id, { enabled: !r.enabled }).then(loadRules).catch(function (e) { toast(e.message, "err"); }); }
   function deleteRule(r) { if (!confirm("删除该规则？")) return; api.del("/api/rules/" + r.id).then(loadRules).catch(function (e) { toast(e.message, "err"); }); }
 
+  // ---------------- 布局：拖拽伸缩 + 折叠隐藏 ----------------
+  var PANES = ["sidebar", "list", "viewer", "chat"];
+  var RESIZER_OF = { sidebar: "rz-sidebar", list: "rz-list", chat: "rz-chat" };
+  var WIDTH_VAR = { sidebar: "--sidebar-w", list: "--list-w", chat: "--chat-w" };
+
+  function paneEl(name) { return document.querySelector('.pane[data-pane="' + name + '"]'); }
+
+  function applyWidths() {
+    var L = loadLayout();
+    ["sidebar", "list", "chat"].forEach(function (name) {
+      if (L["w_" + name]) document.documentElement.style.setProperty(WIDTH_VAR[name], L["w_" + name] + "px");
+    });
+  }
+  function applyVisibility() {
+    var L = loadLayout();
+    PANES.forEach(function (name) {
+      var hidden = !!L["hide_" + name];
+      var pe = paneEl(name); if (pe) pe.classList.toggle("collapsed", hidden);
+      var rzName = RESIZER_OF[name];
+      if (rzName) { var rz = $(rzName); if (rz) rz.classList.toggle("collapsed", hidden); }
+    });
+    var center = $("center");
+    if (center) center.classList.toggle("list-grow", !!L["hide_viewer"]);  // 预览隐藏时列表充满
+    document.querySelectorAll(".layout-toggles .lt").forEach(function (b) {
+      b.classList.toggle("active", !L["hide_" + b.getAttribute("data-pane")]);
+    });
+  }
+  function togglePane(name) {
+    var L = loadLayout();
+    L["hide_" + name] = !L["hide_" + name];
+    saveLayout(L);
+    applyVisibility();
+  }
+  function startResize(e, rz) {
+    var name = rz.getAttribute("data-for");
+    var varName = WIDTH_VAR[name]; if (!varName) return;
+    var pe = paneEl(name); if (!pe) return;
+    var startX = e.clientX, startW = pe.getBoundingClientRect().width;
+    var dir = (name === "chat") ? -1 : 1;   // chat 在右侧，向左拖增大宽度
+    document.body.classList.add("resizing"); rz.classList.add("dragging");
+    function onMove(ev) {
+      var w = Math.round(startW + dir * (ev.clientX - startX));
+      w = Math.max(160, Math.min(w, window.innerWidth - 220));
+      document.documentElement.style.setProperty(varName, w + "px");
+    }
+    function onUp() {
+      document.body.classList.remove("resizing"); rz.classList.remove("dragging");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      var patch = {}; patch["w_" + name] = Math.round(pe.getBoundingClientRect().width); saveLayout(patch);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    e.preventDefault();
+  }
+
   // ---------------- 事件绑定 ----------------
   function bind() {
     $("add-btn").addEventListener("click", addPaper);
@@ -424,6 +659,23 @@
     $("open-rules").addEventListener("click", openRules);
     $("add-rule").addEventListener("click", addRule);
 
+    // 论文操作（预览工具栏）
+    $("move-paper").addEventListener("click", function () { if (state.currentPaper) openMoveModal(state.currentPaper); });
+    $("delete-paper").addEventListener("click", function () { if (state.currentPaper) deletePaper(state.currentPaper); });
+    $("reextract-paper").addEventListener("click", reextractPaper);
+    $("move-confirm").addEventListener("click", confirmMove);
+
+    // 布局：顶栏切换按钮 + 各面板隐藏按钮 + 拖拽分隔条
+    document.querySelectorAll(".layout-toggles .lt").forEach(function (b) {
+      b.addEventListener("click", function () { togglePane(b.getAttribute("data-pane")); });
+    });
+    document.querySelectorAll(".pane-hide").forEach(function (b) {
+      b.addEventListener("click", function (e) { e.stopPropagation(); togglePane(b.getAttribute("data-hide")); });
+    });
+    document.querySelectorAll(".resizer").forEach(function (rz) {
+      rz.addEventListener("pointerdown", function (e) { startResize(e, rz); });
+    });
+
     document.querySelectorAll("[data-close]").forEach(function (b) {
       b.addEventListener("click", function () { $(b.getAttribute("data-close")).classList.add("hidden"); });
     });
@@ -434,9 +686,13 @@
 
   // ---------------- 启动 ----------------
   function init() {
+    applyWidths();
+    applyVisibility();
     bind();
     loadFolders().then(loadPapers).catch(function (e) { toast("初始化失败：" + e.message, "err"); });
   }
+  // 暴露 Markdown 渲染器，便于调试/自检（不影响正常功能）
+  window.__arxivreader_md = renderMarkdown;
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 })();

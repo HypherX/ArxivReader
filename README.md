@@ -145,14 +145,32 @@ python -m app.main
    系统会解析元数据 → 下载 PDF → 抽取全文 → 归档入库。未指定文件夹时按规则自动归档，
    无规则命中则落入 `Inbox`。
 2. **浏览与阅读**：左栏选择文件夹，中栏点击论文即在右侧 `<iframe>` 内联预览 PDF。
-3. **对话阅读**：右栏“新建会话”，输入问题，回答以 SSE 流式逐字返回。论文全文已塞入上下文，
+3. **移动 / 删除论文**：悬停论文卡片右上角出现 `📁 移动` / `🗑 删除`；选中论文后 PDF 预览区顶部
+   工具栏也提供 `📁 移动`、`↻ 重抽全文`、`🗑 删除`。删除会一并移除本地 PDF 与该论文的对话记录。
+4. **对话阅读**：右栏“新建会话”，输入问题，回答以 SSE 流式逐字返回并**自动渲染 Markdown**
+   （标题/列表/代码块/表格/链接等，内容经 HTML 转义，杜绝脚本注入）。论文全文已塞入上下文，
    可要求模型**引用页码**（全文按 `[Page N]` 分页标记）。
-4. **归档规则**：顶部“归档规则”新增规则，选择匹配字段（category/keyword/author/title）、
+5. **归档规则**：顶部“归档规则”新增规则，选择匹配字段（category/keyword/author/title）、
    匹配值、目标文件夹与 priority（越小越先）。入库时按 priority 升序取**首条命中**。
    - `category`：支持精确（`cs.CL`）或前缀（`cs` 匹配所有 `cs.*`）。
    - `keyword`：命中标题 + 摘要（不区分大小写）。
    - `author` / `title`：子串匹配（不区分大小写）。
-5. **LLM 设置**：顶部“设置”修改端点与采样参数，点击“测试连接”发一条 ping 验证连通性。
+6. **LLM 设置**：顶部“设置”修改端点与采样参数，点击“测试连接”发一条 ping 验证连通性。
+7. **界面布局**：顶栏的 `📁 📄 👁 💬` 一组按钮可**显示/隐藏**对应面板；面板之间的竖直分隔条
+   **可拖拽调整宽度**。隐藏状态与宽度会记忆在浏览器 `localStorage`，刷新后保持。
+
+### 全文入上下文的状态可见
+
+选中论文后，对话栏标题下方会显示**上下文状态**：
+
+- `✓ 已将全文 N 字符加入对话上下文`（绿色）——正文已成功抽取并会随提问发送给 LLM；
+- `（原文过长，已截断至上限）`——超过 `120,000` 字符阈值时的截断提示；
+- `⚠ 未抽取到正文，当前仅标题/摘要入上下文`（黄色）——多为扫描版/图片型 PDF 或抽取失败，
+  此时点击工具栏 `↻ 重抽全文`（`POST /api/papers/{id}/reextract`）可在本地 PDF 存在时重抽、
+  否则按 `arxiv_id` 重新下载后再抽取。列表中此类论文会标注 `⚠ 无正文` 徽章。
+
+> 说明：后端“全文直塞”一直会把 `full_text` 拼进 system prompt；此前当抽取为空时会**静默**
+> 退化为仅摘要，现通过上述状态提示与“重抽全文”使其可见、可修复。
 
 ### 全文直塞与截断
 
@@ -167,7 +185,7 @@ python -m app.main
 |---|---|
 | 健康 | `GET /api/health` |
 | 文件夹 | `GET /api/folders`（树）· `POST /api/folders` · `PATCH /api/folders/{id}` · `DELETE /api/folders/{id}` |
-| 论文 | `POST /api/papers/from-arxiv` · `GET /api/papers?folder_id=&q=` · `GET /api/papers/{id}` · `PATCH /api/papers/{id}` · `DELETE /api/papers/{id}` · `GET /api/papers/{id}/pdf` · `GET /api/papers/{id}/text` |
+| 论文 | `POST /api/papers/from-arxiv` · `GET /api/papers?folder_id=&q=` · `GET /api/papers/{id}` · `PATCH /api/papers/{id}`（移动/改名）· `DELETE /api/papers/{id}` · `GET /api/papers/{id}/pdf` · `GET /api/papers/{id}/text` · `POST /api/papers/{id}/reextract`（重抽全文）|
 | 规则 | `GET /api/rules` · `POST /api/rules` · `PATCH /api/rules/{id}` · `DELETE /api/rules/{id}` |
 | 对话 | `POST /api/papers/{id}/sessions` · `GET /api/papers/{id}/sessions` · `GET /api/sessions/{sid}/messages` · `POST /api/sessions/{sid}/messages`（SSE）· `DELETE /api/sessions/{sid}` |
 | 设置 | `GET /api/settings` · `PUT /api/settings` · `POST /api/settings/test` |
