@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 本地配置（含密钥），不入库
+config.py
+
+# 运行时数据：SQLite 数据库 + 下载的 PDF + 抽取缓存
+data/
+
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# pytest
+.pytest_cache/
