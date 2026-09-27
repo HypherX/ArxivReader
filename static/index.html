@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <!-- 顶栏：品牌 / 添加论文 / 全局操作 -->
+  <!-- 顶栏：品牌 / 添加论文 / 布局切换 / 全局操作 -->
   <header id="topbar">
     <div class="brand"><span class="logo">📚</span><span class="bname">ArxivReader</span><span class="btag">文献管理</span></div>
     <div class="add-box">
@@ -16,7 +16,14 @@
       <select id="target-folder" title="选择目标文件夹，或按规则自动归档"></select>
       <button id="add-btn" class="primary">添加</button>
     </div>
+    <div class="layout-toggles" title="显示 / 隐藏各面板">
+      <button class="lt" data-pane="sidebar" title="文件夹栏">📁</button>
+      <button class="lt" data-pane="list" title="论文列表">📄</button>
+      <button class="lt" data-pane="viewer" title="PDF 预览">👁</button>
+      <button class="lt" data-pane="chat" title="对话栏">💬</button>
+    </div>
     <div class="top-actions">
+      <button id="open-search" class="ghost accent" title="ArXiv 检索 + 智能筛选（结果进待读缓冲区）· ⌘K">🔎 ArXiv 检索</button>
       <button id="open-rules" class="ghost">归档规则</button>
       <button id="open-settings" class="ghost">设置</button>
     </div>
@@ -24,43 +31,119 @@
 
   <div id="toast" class="toast hidden"></div>
 
-  <!-- 三栏主体 -->
+  <!-- 三/四栏主体（含可拖拽分隔条） -->
   <main id="layout">
     <!-- 左：文件夹树 -->
-    <aside id="sidebar">
+    <aside id="sidebar" class="pane" data-pane="sidebar">
       <div class="side-head">
         <span>文件夹</span>
-        <button id="new-folder" class="mini" title="新建顶层文件夹">＋</button>
+        <span class="side-head-ops">
+          <button id="new-folder" class="mini" title="新建顶层文件夹">＋</button>
+          <button class="mini pane-hide" data-hide="sidebar" title="隐藏此栏">«</button>
+        </span>
       </div>
       <div id="folder-all" class="folder-row all selected">
         <span class="fname">全部论文</span><span class="count" id="all-count">0</span>
       </div>
       <div id="folder-tree"></div>
     </aside>
+    <div class="resizer" id="rz-sidebar" data-for="sidebar" title="拖拽调整宽度"></div>
 
     <!-- 中：论文列表 + PDF 预览 -->
     <section id="center">
-      <div id="list-pane">
+      <div id="list-pane" class="pane" data-pane="list">
+        <div class="pane-head">
+          <span>论文</span>
+          <button class="mini pane-hide" data-hide="list" title="隐藏此栏">«</button>
+        </div>
         <input id="search" type="text" placeholder="搜索标题 / 摘要 / 作者…" autocomplete="off" />
         <div id="paper-list"></div>
       </div>
-      <div id="viewer-pane">
-        <div id="viewer-empty" class="empty">选择一篇论文以预览 PDF</div>
-        <iframe id="pdf-frame" class="hidden" title="PDF 预览"></iframe>
+      <div class="resizer" id="rz-list" data-for="list" title="拖拽调整宽度"></div>
+      <div id="viewer-pane" class="pane" data-pane="viewer">
+        <div id="viewer-toolbar" class="viewer-toolbar hidden">
+          <span id="viewer-title" class="v-title"></span>
+          <span class="v-ops">
+            <button id="run-pipeline" class="mini" title="对这篇论文跑知识网络：快速总结 → 方向树归属 → 深度精读 → 局部图谱 → 阶段综述（产物在右栏页签里查看）">🧠 知识网络</button>
+            <button id="move-paper" class="mini" title="移动到其它文件夹">📁 移动</button>
+            <button id="reextract-paper" class="mini" title="重新抽取 PDF 全文">↻ 重抽全文</button>
+            <button id="delete-paper" class="mini danger" title="从库中删除">🗑 删除</button>
+            <button class="mini pane-hide" data-hide="viewer" title="隐藏此栏">«</button>
+          </span>
+        </div>
+        <div id="viewer-body">
+          <div id="viewer-empty" class="empty rich">
+            <div class="icon">📖</div>
+            <div class="t">选一篇论文开始阅读</div>
+            <div class="h">左侧列表点击论文即可预览 PDF 并就其提问；点击带 🧭 的方向文件夹，查看该方向的论文图谱。</div>
+          </div>
+          <iframe id="pdf-frame" class="hidden" title="PDF 预览"></iframe>
+          <div id="graph-view" class="hidden">
+            <div id="graph-head">
+              <span id="graph-path" class="g-path"></span>
+              <span class="g-ops">
+                <a id="graph-md-link" class="mini" href="#" title="在新窗口打开 Markdown">↗ md</a>
+                <button id="graph-refresh" class="mini" title="重新加载图谱（含最新综述）">↻ 刷新</button>
+                <button id="graph-export" class="mini" title="重建文件夹与每个节点的 GRAPH.md">⇪ 重建文件</button>
+                <button id="graph-del" class="mini danger" title="删除该方向节点（论文保留）">🗑 删除方向</button>
+              </span>
+            </div>
+            <div id="graph-meta" class="hint"></div>
+            <div id="graph-legend" class="graph-legend hidden"></div>
+            <div id="graph-svg-box"></div>
+            <div id="graph-papers" class="g-papers"></div>
+            <details id="graph-md-box" class="graph-md">
+              <summary>论文图谱文档（GRAPH.md：关系明细 + 阶段综述）</summary>
+              <div id="graph-md" class="md"></div>
+            </details>
+          </div>
+        </div>
       </div>
     </section>
 
+    <div class="resizer" id="rz-chat" data-for="chat" title="拖拽调整宽度"></div>
+
     <!-- 右：对话阅读 -->
-    <aside id="chat-pane">
+    <aside id="chat-pane" class="pane" data-pane="chat">
       <div id="chat-head">
-        <div id="chat-title">未选择论文</div>
+        <div class="chat-head-top">
+          <div id="chat-title">未选择论文</div>
+          <button class="mini pane-hide" data-hide="chat" title="隐藏此栏">»</button>
+        </div>
+        <div id="ctx-status" class="ctx-status hidden"></div>
         <div class="chat-head-actions">
           <select id="session-select" title="切换会话"></select>
           <button id="new-session" class="mini" title="新建会话">＋</button>
         </div>
       </div>
+      <div id="pipeline-panel" class="pipeline-panel hidden"></div>
+
+      <!-- 阅读产物：对话 / 快速总结 / 深度精读 三个页签（产物由知识网络 pipeline 生成） -->
+      <div id="artifact-tabs" class="artifact-tabs">
+        <button class="art-tab active" data-view="chat" title="与论文对话">💬 对话</button>
+        <button class="art-tab" data-view="summary" title="快速总结：洞察、贡献、结论（含“解决了什么 / 未来展望”）">🧾 快速总结<span class="art-meta"></span></button>
+        <button class="art-tab" data-view="deep_reading" title="深度精读：动机、方法、实验、局限、可复现要点">📖 深度精读<span class="art-meta"></span></button>
+      </div>
+
+      <div id="artifact-view" class="artifact-view hidden">
+        <div class="av-head">
+          <span id="av-title" class="av-title"></span>
+          <span id="av-meta" class="av-meta"></span>
+          <span class="av-ops">
+            <button id="av-copy" class="mini" title="复制全文 Markdown">⧉ 复制</button>
+            <button id="av-open" class="mini" title="在新窗口打开（可直接另存为 .md）">↗ 新窗口</button>
+            <button id="av-regen" class="mini" title="重新生成这份产物（会覆盖当前内容）">↻ 重新生成</button>
+            <button id="av-close" class="mini" title="回到对话">✕</button>
+          </span>
+        </div>
+        <div id="av-body" class="av-body md"></div>
+      </div>
       <div id="messages">
-        <div class="empty">选择论文并开始一次对话，就论文内容向 LLM 提问。</div>
+        <div class="empty rich">
+          <div class="icon">💬</div>
+          <div class="t">就论文提问</div>
+          <div class="h">选中论文后，全文会进入对话上下文。试试问：这篇论文解决了什么问题？核心方法是什么？</div>
+        </div>
       </div>
       <div id="chat-input-row">
         <textarea id="chat-input" rows="2" placeholder="就这篇论文提问…（Enter 发送，Shift+Enter 换行）"></textarea>
@@ -68,6 +151,22 @@
       </div>
     </aside>
   </main>
+
+  <!-- 移动论文弹窗 -->
+  <div id="move-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head"><span>移动论文到文件夹</span><button class="mini" data-close="move-modal">✕</button></div>
+      <div class="modal-body">
+        <div class="hint" id="move-paper-title"></div>
+        <label>目标文件夹<select id="move-folder"></select></label>
+      </div>
+      <div class="modal-foot">
+        <span class="spacer"></span>
+        <button class="ghost" data-close="move-modal">取消</button>
+        <button id="move-confirm" class="primary">移动</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 设置弹窗 -->
   <div id="settings-modal" class="modal hidden">
@@ -118,6 +217,86 @@
       <div class="modal-foot">
         <span class="spacer"></span>
         <button class="ghost" data-close="rules-modal">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ArXiv 检索（检索 -> 预筛 -> 总结验证 -> 缓冲区） -->
+  <div id="search-modal" class="modal hidden">
+    <div class="modal-card search-wide">
+      <div class="modal-head">
+        <span>ArXiv 检索 · 智能筛选</span>
+        <span class="head-hint">标题与摘要先过筛，把时间留给值得读的论文</span>
+        <button class="mini" data-close="search-modal">✕</button>
+      </div>
+      <div class="modal-body search-body">
+        <div class="search-left">
+          <div class="search-form">
+            <label>日期从<input id="s-date-from" type="date" /></label>
+            <label>到<input id="s-date-to" type="date" /></label>
+            <label>最多条数<input id="s-max" type="number" value="40" min="1" max="500" /></label>
+            <label>预筛阈值<input id="s-min-score" type="number" value="0.55" step="0.05" min="0" max="1" /></label>
+            <label>复核上限<input id="s-max-sum" type="number" value="12" min="0" max="50" /></label>
+          </div>
+          <div class="search-cats" id="s-cats"></div>
+          <div class="search-kw">
+            <input id="s-keywords" type="text" placeholder="关键词（空格或逗号分隔），如：credit assignment, variance" />
+            <select id="s-kw-mode" title="多个关键词之间的关系">
+              <option value="and">全部命中 (AND)</option>
+              <option value="or">任一命中 (OR)</option>
+            </select>
+          </div>
+          <div class="search-actions">
+            <span class="hint" id="s-hint">Step1 只取标题与摘要（不下载全文）；Step2 读方向树预筛；Step3 对过线论文跑快速总结并复核归属；Step4 写入待读缓冲区。</span>
+          </div>
+
+          <div id="s-progress" class="hidden">
+            <div class="stage-row" id="s-stages"></div>
+            <div class="progress"><div id="s-bar" class="progress-bar"></div></div>
+            <div class="hint" id="s-counters"></div>
+            <div id="s-logs" class="search-logs"></div>
+          </div>
+        </div>
+
+        <div class="search-results">
+          <div class="results-head">
+            <span>匹配论文（待读缓冲区）</span>
+            <span class="hint" id="s-buffer-counts"></span>
+          </div>
+          <div id="s-buffer"></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="s-run" class="primary">开始检索</button>
+        <button id="s-cancel" class="ghost hidden">中断检索</button>
+        <span class="hint foot-hint">「加入详细阅读」会下载全文并跑：快速总结 → 方向树归属 → 深度精读 → 局部图谱 → 阶段综述</span>
+        <span class="spacer"></span>
+        <button class="ghost" data-close="search-modal">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ctx-menu" class="ctx-menu hidden"></div>
+
+  <!-- 通用确认 / 输入弹窗（替代原生 prompt / confirm：沙箱环境会禁用原生弹窗） -->
+  <div id="dialog-modal" class="modal hidden">
+    <div class="modal-card dialog-card">
+      <div class="modal-head">
+        <span id="dlg-title">确认</span>
+        <span class="head-hint"></span>
+        <button class="mini" data-close="dialog-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="dlg-message" class="dlg-message"></div>
+        <label id="dlg-input-wrap" class="hidden">
+          <span id="dlg-input-label">名称</span>
+          <input id="dlg-input" type="text" autocomplete="off" />
+        </label>
+      </div>
+      <div class="modal-foot">
+        <span class="spacer"></span>
+        <button id="dlg-cancel" class="ghost">取消</button>
+        <button id="dlg-ok" class="primary">确定</button>
       </div>
     </div>
   </div>

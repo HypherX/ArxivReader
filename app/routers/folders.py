@@ -2,6 +2,9 @@
 
 删除文件夹时，其子文件夹与论文上移到父级（顶层则移入 Inbox），不做级联删除，
 避免误删论文。Inbox 为系统默认文件夹，禁止删除。
+
+🧭 方向文件夹是方向树的镜像（folders.direction_node_id），改名走方向节点，
+否则文件夹名与图谱里的方向名会分叉；删除则直接拒绝（需先删方向节点）。
 """
 
 from typing import Dict, List
@@ -10,8 +13,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from knowledge import store as knowledge_store
+
 from .. import database, schemas
-from ..models import Folder, Paper
+from ..models import DirectionNode, Folder, Paper
 
 router = APIRouter(prefix="/api/folders", tags=["folders"])
 
@@ -29,7 +34,8 @@ def _build_tree(folders: List[Folder], counts: Dict[int, int]) -> List[schemas.F
     nodes = {
         f.id: schemas.FolderNode(
             id=f.id, name=f.name, parent_id=f.parent_id,
-            paper_count=counts.get(f.id, 0), children=[],
+            paper_count=counts.get(f.id, 0), direction_node_id=f.direction_node_id,
+            children=[],
         )
         for f in folders
     }
@@ -95,7 +101,16 @@ def update_folder(folder_id: int, body: schemas.FolderUpdate,
         name = body.name.strip()
         if not name:
             raise HTTPException(status_code=400, detail="文件夹名不能为空")
-        folder.name = name
+        node = (db.get(DirectionNode, folder.direction_node_id)
+                if folder.direction_node_id else None)
+        if node is not None:                 # 🧭 镜像文件夹：改名交给方向节点，保持单一数据源
+            try:
+                knowledge_store.rename_node(db, node, name)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            db.refresh(folder)
+        else:
+            folder.name = name
     if "parent_id" in fields:
         new_parent = body.parent_id
         if new_parent == folder_id:
@@ -119,6 +134,9 @@ def delete_folder(folder_id: int, db: Session = Depends(database.get_db)):
         raise HTTPException(status_code=404, detail="文件夹不存在")
     if folder.name == database.INBOX_NAME and folder.parent_id is None:
         raise HTTPException(status_code=400, detail="Inbox 为系统默认文件夹，不能删除")
+    if folder.direction_node_id:
+        raise HTTPException(status_code=400,
+                            detail="该文件夹是方向树的镜像（🧭），请在图谱视图里用「删除方向节点」处理")
 
     new_parent_id = folder.parent_id
     if new_parent_id is None:
