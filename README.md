@@ -1,197 +1,109 @@
-# ArxivReader · 本地文献管理系统
+# ArxivReader
+[中文](README.md) | [English](README.en.md)
 
-> 产品名为 **ArxivReader**；代码目前位于 `paper_reader/` 目录下（下文涉及文件系统路径处仍沿用该目录名）。
+一个在自己电脑上运行的论文阅读工具：把 arXiv 论文或本地 PDF 收进资料库，直接在应用里读 PDF、向 AI 提问、做总结，还能把一堆论文整理成方向树和综述笔记。
 
-一个类 Zotero 的**本地单用户**文献管理系统。后端 FastAPI + SQLite，前端为 FastAPI
-托管的浏览器单页应用（**原生 JS，无 Node 构建、无外部 CDN**，可完全离线运行）。
+所有数据都保存在你自己的电脑上，不需要注册账号，也不需要部署服务器。
 
-核心能力：
+## 它能做什么
 
-- **嵌套文件夹管理** —— 任意层级创建 / 重命名 / 移动 / 删除文件夹，组织你的论文库。
-- **ArXiv 一键入库** —— 粘贴 ArXiv 链接（或裸 id），自动解析元数据、下载 PDF、抽取全文并归档。
-- **规则自动归档** —— 按 `分类 / 关键词 / 作者 / 标题` 规则把新论文自动分到指定文件夹。
-- **对话式阅读** —— 将论文全文直接塞进上下文，用任意 OpenAI 兼容 LLM 提问，**流式（SSE）逐字返回**。
+- **收论文**：粘贴 arXiv 链接或编号（如 `2401.12345`），或直接把电脑里的 PDF 文件传进来。
+- **读论文**：内置 PDF 阅读器，可以就这篇论文向 AI 提问（全文自动作为上下文），也可以一键生成“快速总结”或“深度精读”笔记。
+- **整理成网**：论文自动归入方向树，同方向的论文会提炼出互相的关系（改进、对比、互补等），还能按文件夹生成综述报告。
+- **批量找论文**：按分类、关键词、日期检索 arXiv，AI 先帮你预筛一遍，结果放进“待读区”，你决定哪些正式入库。
 
----
+## 快速开始
 
-## 技术栈
+### 方式一：下载打包好的应用（推荐普通用户）
 
-| 层 | 选型 |
-|---|---|
-| Web 后端 | FastAPI + Uvicorn（原生 async、SSE 流式、自动 OpenAPI 文档） |
-| 前端 | 原生 JavaScript（ES2017）+ 原生 CSS，`fetch` + `ReadableStream` 消费 SSE |
-| PDF 展示 | 浏览器原生 PDF 查看器（`<iframe>` 指向 `/api/papers/{id}/pdf`） |
-| 数据库 | SQLite + SQLAlchemy 2.0 ORM |
-| ArXiv | 官方 `arxiv` Python 包（2.x API） |
-| PDF 解析 | PyMuPDF（`fitz`） |
-| LLM | `openai` SDK（OpenAI 兼容接口） |
+仓库暂时没有提供官方安装包下载。如果你拿到了构建好的压缩包（ZIP）：
 
-> **关于前端选型**：原计划使用 Vue 3（CDN 引入）。实现时改为**原生 JS**——本地工具应可离线
-> 运行，且引入无 SRI 校验的第三方 CDN 脚本存在供应链风险。此调整不影响任何功能与交互设计。
+- **Mac**：解压后把 `ArxivReader.app` 拖进“应用程序”，双击打开。
+  首次打开如果提示“无法验证开发者”，到 系统设置 → 隐私与安全性 里点“仍要打开”即可，不用关闭系统安全功能。注意 Apple Silicon 和 Intel 的包不通用。
+- **Windows**：解压后保留文件夹里的所有文件，双击 `ArxivReader.exe`。
+  如果提示缺少 WebView2，按提示到微软官网安装 WebView2 Runtime 后重新打开即可。不需要安装 Python。
 
-运行环境：**Python 3.9+**（已在 3.9 验证）。全系统**不读取任何环境变量**，配置集中在 `config.py`。
+### 方式二：从源码运行（推荐会折腾的用户）
 
----
-
-## 目录结构
-
-```
-paper_reader/
-├── config.py               # 本地实际配置（gitignore，不入库）
-├── config.example.py       # 入库的配置模板
-├── requirements.txt
-├── README.md
-├── .gitignore
-├── conftest.py             # pytest 根配置（sys.path 注入）
-├── app/
-│   ├── main.py             # FastAPI 入口：lifespan 建库、路由挂载、static 托管
-│   ├── config_loader.py    # 从 config.py 读取 LLM / STORAGE 配置（无环境变量）
-│   ├── database.py         # engine/SessionLocal/Base、init_db、ensure_inbox
-│   ├── models.py           # ORM：Folder/Paper/FilingRule/ChatSession/ChatMessage/Setting
-│   ├── schemas.py          # Pydantic v2 请求/响应模型
-│   ├── settings_store.py   # config 播种 + DB 持久化 + 运行时读取 LLM 设置
-│   ├── llm_client.py       # OpenAI 兼容：客户端缓存 + 重试退避 + chat/chat_stream
-│   ├── arxiv_service.py    # id 规范化 / 元数据获取 / PDF 下载
-│   ├── pdf_service.py      # 全文抽取（[Page N] 标记）/ 超长截断
-│   ├── filing.py           # 规则匹配引擎（priority 升序，first-match，Inbox 兜底）
-│   └── routers/
-│       ├── folders.py      # 文件夹树 CRUD
-│       ├── papers.py       # ArXiv 入库 / 列表 / 移动 / PDF / 全文
-│       ├── rules.py        # 归档规则 CRUD
-│       ├── chat.py         # 会话 + 流式对话（SSE）
-│       └── settings.py     # LLM 设置读写 + 连通性测试
-├── static/
-│   ├── index.html          # 三栏布局骨架
-│   ├── app.js              # 原生 JS 应用：状态、API、SSE 流式对话
-│   └── style.css           # 浅色主题样式
-├── tests/                  # pytest：链接解析 / 规则引擎 / API 集成（含 SSE）
-└── data/                   # 运行时生成（gitignore）：library.db、pdfs/
-```
-
----
-
-## 安装
+需要电脑装有 Python 3.12：
 
 ```bash
-cd paper_reader
-
-# 建议用虚拟环境
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-
+# 1. 安装依赖
 pip install -r requirements.txt
+
+# 2. 启动（二选一）
+python desktop.py                                              # 桌面窗口
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8765    # 然后用浏览器打开 http://127.0.0.1:8765
 ```
 
-## 配置
+### 方式三：自己打包成应用
 
-复制模板并填入真实值（`config.py` 已被 `.gitignore` 忽略，**切勿把真实 api_key 提交入库**）：
+在与目标一致的系统上（Mac 上打 Mac 包，Windows 上打 Windows 包）：
 
 ```bash
-cp config.example.py config.py
+python3 -m venv .build-venv
+.build-venv/bin/pip install -r requirements-build.txt    # Windows 换成 .build-venv\Scripts\pip.exe
+.build-venv/bin/python tools/build_desktop.py
 ```
 
-`config.py` 内容：
+产物在 `dist/` 目录里，附带 SHA256 校验文件。
 
-```python
-# ============ LLM 调用配置（OpenAI 兼容接口） ============
-# 填好 base_url / api_key / model 三项即可直连任意 OpenAI 兼容服务：
-#   OpenAI         https://api.openai.com/v1
-#   DeepSeek       https://api.deepseek.com/v1
-#   Qwen/DashScope https://dashscope.aliyuncs.com/compatible-mode/v1
-#   本地 vLLM      http://127.0.0.1:8000/v1
-#   本地 Ollama    http://127.0.0.1:11434/v1
-LLM = {
-    "base_url": "https://api.openai.com/v1",
-    "api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxx",   # 必填；严禁提交入库
-    "model": "gpt-4o-mini",
-    "temperature": 0.3,
-    "max_tokens": 4096,
-    "top_p": 1.0,
-    "request_timeout": 120.0,
-    "max_retries": 3,
-}
+## 第一次用：配置 AI 模型
 
-# ============ 存储配置 ============
-STORAGE = {
-    # 数据库(library.db)与下载 PDF 的根目录。留空 = paper_reader/data/
-    "base_dir": "",
-}
-```
+这个应用的“总结、问答、综述”等功能都靠大模型驱动，模型服务由你自己提供。首次启动会自动打开“设置”页，填三项：
 
-> `config.py` 的值仅在**首次启动**时写入 SQLite 作为默认值。之后可直接在网页右上角
-> **“设置”**里修改 `base_url/api_key/model/采样参数`，网页修改持久化到数据库，不会回写本文件。
+1. **Base URL**：模型服务商给的 API 地址（兼容 OpenAI Chat Completions 接口的都行）。
+2. **API Key**：你的密钥。
+3. **模型**：模型名称，比如 `gpt-4o`、`deepseek-chat` 之类，以你的服务商为准。
 
-## 启动
+点“测试连接”确认能用（会真实调用一次模型，可能产生几分钱费用），然后点“保存”。
+不配模型也能用——可以正常管理论文、读 PDF，只是 AI 功能用不了。
 
-```bash
-# 方式一：uvicorn（推荐，可加 --reload 热重载）
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
+## 日常使用
 
-# 方式二：直接运行入口
-python -m app.main
-```
+**添加论文**（两种方式，都在页面顶部）：
 
-启动后浏览器打开 **http://127.0.0.1:8765/** 。首次启动会自动建库、创建默认 `Inbox`
-文件夹并播种 LLM 设置。API 文档见 http://127.0.0.1:8765/docs 。
+1. 粘贴 arXiv 链接或编号 → 点“添加”，应用会自动下载 PDF 并抽取全文。
+2. 点“📤 上传 PDF” → 选择电脑里的 PDF 文件。上传过的文件会记住，重复上传同一个文件会提示已在库中。
 
-> 若 8765 端口被占用，换用其它端口即可，例如 `--port 8770`。
+两种方式都可以先在旁边的下拉框里选好目标文件夹；不选则自动归档（arXiv 论文按归档规则匹配，本地 PDF 进 Inbox）。
 
----
+**阅读和提问**：在论文列表里点一篇论文，中间看 PDF，右边对话框直接问，比如“这篇的核心方法是什么”。
 
-## 使用说明
+**AI 功能**：
 
-1. **添加论文**：把 ArXiv 链接（`https://arxiv.org/abs/2401.12345`、`.../pdf/...`、
-   裸 id `2401.12345`、旧式 `math/0211159` 均可）粘贴到顶部输入框，可选目标文件夹，点击“添加”。
-   系统会解析元数据 → 下载 PDF → 抽取全文 → 归档入库。未指定文件夹时按规则自动归档，
-   无规则命中则落入 `Inbox`。
-2. **浏览与阅读**：左栏选择文件夹，中栏点击论文即在右侧 `<iframe>` 内联预览 PDF。
-3. **对话阅读**：右栏“新建会话”，输入问题，回答以 SSE 流式逐字返回。论文全文已塞入上下文，
-   可要求模型**引用页码**（全文按 `[Page N]` 分页标记）。
-4. **归档规则**：顶部“归档规则”新增规则，选择匹配字段（category/keyword/author/title）、
-   匹配值、目标文件夹与 priority（越小越先）。入库时按 priority 升序取**首条命中**。
-   - `category`：支持精确（`cs.CL`）或前缀（`cs` 匹配所有 `cs.*`）。
-   - `keyword`：命中标题 + 摘要（不区分大小写）。
-   - `author` / `title`：子串匹配（不区分大小写）。
-5. **LLM 设置**：顶部“设置”修改端点与采样参数，点击“测试连接”发一条 ping 验证连通性。
+- “🧠 知识网络”：对当前论文跑 快速总结 → 自动分类 → 深度精读 → 关系提炼。
+- “🔗 智能关联检索”：读这篇论文引用的文献，自动去 arXiv 找出强相关的论文。
+- “🔎 ArXiv 检索”：按条件批量检索，AI 预筛后放进待读区。
+- 文件夹右键或“生成综述”：把一个文件夹的论文汇总成一份综述报告，历史版本都能回看。
 
-### 全文直塞与截断
+**长任务可以随时停止**，已经生成的部分会保留，下次还能接着跑。
 
-论文问答采用**全文直塞上下文**策略（不引入向量库 / RAG）。当抽取全文超过约
-`120,000` 字符时会**截断**，并在 UI 明确提示“论文过长已截断”，以避免超出模型上下文窗口。
+## 数据存在哪
 
----
+- 打包版：Mac 在 `~/Library/Application Support/ArxivReader/data/`，Windows 在 `%LOCALAPPDATA%/ArxivReader/data/`。
+- 源码运行：就在项目目录的 `data/` 里。
+- 论文 PDF、数据库、笔记全在这个目录。备份整个目录即可（备份前先关闭应用）。
 
-## REST API 概览
+**两件需要知道的事**：
 
-| 分组 | 端点 |
-|---|---|
-| 健康 | `GET /api/health` |
-| 文件夹 | `GET /api/folders`（树）· `POST /api/folders` · `PATCH /api/folders/{id}` · `DELETE /api/folders/{id}` |
-| 论文 | `POST /api/papers/from-arxiv` · `GET /api/papers?folder_id=&q=` · `GET /api/papers/{id}` · `PATCH /api/papers/{id}` · `DELETE /api/papers/{id}` · `GET /api/papers/{id}/pdf` · `GET /api/papers/{id}/text` |
-| 规则 | `GET /api/rules` · `POST /api/rules` · `PATCH /api/rules/{id}` · `DELETE /api/rules/{id}` |
-| 对话 | `POST /api/papers/{id}/sessions` · `GET /api/papers/{id}/sessions` · `GET /api/sessions/{sid}/messages` · `POST /api/sessions/{sid}/messages`（SSE）· `DELETE /api/sessions/{sid}` |
-| 设置 | `GET /api/settings` · `PUT /api/settings` · `POST /api/settings/test` |
+1. API Key 存在本地数据库里，没有加密。请别把整个 data 目录分享给别人。
+2. “本地保存”不等于“完全离线”：检索和下载 arXiv 论文需要联网；AI 功能会把论文内容发给你配置的模型服务商，并产生费用，具体数据政策以服务商为准。
 
-删除文件夹不会删论文：其子文件夹与论文上移到父级（顶层移入 `Inbox`）；`Inbox` 禁止删除。
+## 常见问题
 
----
+**上传的 PDF 没有作者、摘要信息？**
+本地 PDF 没有 arXiv 元数据，标题会取 PDF 自带的书签标题或文件名，可以在论文上直接改名。AI 问答和总结不受影响（全文已抽取）。
 
-## 测试
+**扫描版 PDF 无法提问？**
+扫描件没有文字层，抽不出文本。可以在论文工具栏点“↻ 重抽全文”再试一次，仍失败的话需要先用 OCR 工具处理。
 
-```bash
-python -m pytest -q
-```
+**Mac 提示应用已损坏 / 无法打开？**
+这是未签名应用的正常提示，按“快速开始”里的说明在“隐私与安全性”中允许即可。
 
-测试覆盖：`normalize_arxiv_id` 各链接格式、`filing.apply_rules` 的四类匹配 / 优先级 / 停用 /
-兜底、以及 API 集成（文件夹 CRUD、防环、入库归档、去重、列表过滤、PDF/全文端点、规则 CRUD、
-设置脱敏、对话 SSE 流式与多轮历史）。集成测试用临时 SQLite + mock 的 arxiv/pdf/llm，
-**不触网、不依赖真实 LLM**。
+**换电脑 / 迁移数据？**
+关闭应用，把整个 data 目录复制到新电脑对应位置即可。
 
----
+## 许可说明
 
-## 约定与假设
-
-- 单本地用户，无鉴权；服务默认监听 `127.0.0.1`。
-- `config.py` 与 `data/` 均被 gitignore；全系统不读环境变量。
-- 文件夹支持任意嵌套；论文全文缓存于 DB 以加速重复对话。
-- Python 3.9+；`arxiv` 包使用 2.x API。
+项目许可证尚未确定。PyMuPDF 使用 AGPL／商业双许可证，打包分发需注意其义务。第三方声明见 [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt)。

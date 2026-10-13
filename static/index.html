@@ -1,127 +1,398 @@
 <!DOCTYPE html>
+
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ArxivReader · 文献管理</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>" />
-  <link rel="stylesheet" href="/style.css" />
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title data-i18n="ui.f5337f637ed4">ArxivReader · 文献管理</title>
+<link href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;📚&lt;/text&gt;&lt;/svg&gt;" rel="icon"/>
+<link href="/style.css" rel="stylesheet"/>
+<link href="/vendor/katex/katex.min.css" rel="stylesheet"/>
+<link href="/reading.css" rel="stylesheet"/>
 </head>
 <body>
-  <!-- 顶栏：品牌 / 添加论文 / 全局操作 -->
-  <header id="topbar">
-    <div class="brand"><span class="logo">📚</span><span class="bname">ArxivReader</span><span class="btag">文献管理</span></div>
-    <div class="add-box">
-      <input id="new-url" type="text" placeholder="粘贴 ArXiv 链接或 ID（如 2401.12345），回车入库…" autocomplete="off" />
-      <select id="target-folder" title="选择目标文件夹，或按规则自动归档"></select>
-      <button id="add-btn" class="primary">添加</button>
-    </div>
-    <div class="top-actions">
-      <button id="open-rules" class="ghost">归档规则</button>
-      <button id="open-settings" class="ghost">设置</button>
-    </div>
-  </header>
-
-  <div id="toast" class="toast hidden"></div>
-
-  <!-- 三栏主体 -->
-  <main id="layout">
-    <!-- 左：文件夹树 -->
-    <aside id="sidebar">
-      <div class="side-head">
-        <span>文件夹</span>
-        <button id="new-folder" class="mini" title="新建顶层文件夹">＋</button>
-      </div>
-      <div id="folder-all" class="folder-row all selected">
-        <span class="fname">全部论文</span><span class="count" id="all-count">0</span>
-      </div>
-      <div id="folder-tree"></div>
-    </aside>
-
-    <!-- 中：论文列表 + PDF 预览 -->
-    <section id="center">
-      <div id="list-pane">
-        <input id="search" type="text" placeholder="搜索标题 / 摘要 / 作者…" autocomplete="off" />
-        <div id="paper-list"></div>
-      </div>
-      <div id="viewer-pane">
-        <div id="viewer-empty" class="empty">选择一篇论文以预览 PDF</div>
-        <iframe id="pdf-frame" class="hidden" title="PDF 预览"></iframe>
-      </div>
-    </section>
-
-    <!-- 右：对话阅读 -->
-    <aside id="chat-pane">
-      <div id="chat-head">
-        <div id="chat-title">未选择论文</div>
-        <div class="chat-head-actions">
-          <select id="session-select" title="切换会话"></select>
-          <button id="new-session" class="mini" title="新建会话">＋</button>
-        </div>
-      </div>
-      <div id="messages">
-        <div class="empty">选择论文并开始一次对话，就论文内容向 LLM 提问。</div>
-      </div>
-      <div id="chat-input-row">
-        <textarea id="chat-input" rows="2" placeholder="就这篇论文提问…（Enter 发送，Shift+Enter 换行）"></textarea>
-        <button id="send-btn" class="primary">发送</button>
-      </div>
-    </aside>
-  </main>
-
-  <!-- 设置弹窗 -->
-  <div id="settings-modal" class="modal hidden">
-    <div class="modal-card">
-      <div class="modal-head"><span>LLM 设置（OpenAI 兼容）</span><button class="mini" data-close="settings-modal">✕</button></div>
-      <div class="modal-body">
-        <label>API Base URL<input id="set-base-url" type="text" placeholder="https://api.openai.com/v1" /></label>
-        <label>API Key<input id="set-api-key" type="password" placeholder="留空表示不修改" autocomplete="off" /></label>
-        <div class="hint" id="key-hint"></div>
-        <label>模型名称<input id="set-model" type="text" placeholder="gpt-4o-mini / qwen-plus / deepseek-chat" /></label>
-        <div class="row">
-          <label>temperature<input id="set-temperature" type="number" step="0.1" min="0" max="2" /></label>
-          <label>max_tokens<input id="set-max-tokens" type="number" step="256" min="1" /></label>
-          <label>top_p<input id="set-top-p" type="number" step="0.05" min="0" max="1" /></label>
-        </div>
-        <div class="hint" id="settings-test-result"></div>
-      </div>
-      <div class="modal-foot">
-        <button id="test-llm" class="ghost">测试连接</button>
-        <span class="spacer"></span>
-        <button class="ghost" data-close="settings-modal">取消</button>
-        <button id="save-settings" class="primary">保存</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 规则弹窗 -->
-  <div id="rules-modal" class="modal hidden">
-    <div class="modal-card wide">
-      <div class="modal-head"><span>自动归档规则</span><button class="mini" data-close="rules-modal">✕</button></div>
-      <div class="modal-body">
-        <p class="hint">入库论文若未手动指定文件夹，则按 priority 升序匹配下列启用规则，首条命中即归档；都不命中则进入 Inbox。</p>
-        <div class="rule-form">
-          <input id="rule-name" type="text" placeholder="规则名（可选）" />
-          <select id="rule-type">
-            <option value="category">分类 category</option>
-            <option value="keyword">关键词 keyword</option>
-            <option value="author">作者 author</option>
-            <option value="title">标题 title</option>
-          </select>
-          <input id="rule-pattern" type="text" placeholder="匹配值，如 cs.CL / diffusion / Bengio" />
-          <select id="rule-folder"></select>
-          <input id="rule-priority" type="number" value="100" title="priority，越小越先" />
-          <button id="add-rule" class="primary">添加规则</button>
-        </div>
-        <div id="rule-list"></div>
-      </div>
-      <div class="modal-foot">
-        <span class="spacer"></span>
-        <button class="ghost" data-close="rules-modal">关闭</button>
-      </div>
-    </div>
-  </div>
-
-  <script src="/app.js"></script>
+<!-- 顶栏：品牌 / 添加论文 / 布局切换 / 全局操作 -->
+<header id="topbar">
+<div class="brand"><span class="logo">📚</span><span class="bname">ArxivReader</span><span class="btag" data-i18n="ui.eaaeb438a52d">文献管理</span></div>
+<div class="add-box">
+<input autocomplete="off" data-i18n-placeholder="ui.af00fcd58de6" id="new-url" placeholder="粘贴 ArXiv 链接或 ID（如 2401.12345），回车入库…" type="text"/>
+<select data-i18n-title="ui.aa66102bafc4" id="target-folder" title="选择目标文件夹，或按规则自动归档"></select>
+<button class="primary" data-i18n="ui.7a8a11ead507" id="add-btn">添加</button>
+<button class="ghost" data-i18n="ui.1c7f3a9bd2e4" data-i18n-title="ui.6e2b8d4fa903" id="upload-btn" title="上传本地 PDF 文件入库">📤 上传 PDF</button>
+<input accept=".pdf,application/pdf" hidden id="pdf-upload-input" type="file"/>
+</div>
+<div class="layout-toggles" data-i18n-title="ui.45e25f083f33" title="显示 / 隐藏各面板">
+<button class="lt" data-i18n-title="ui.8ec35243f2bf" data-pane="sidebar" title="文件夹栏">📁</button>
+<button class="lt" data-i18n-title="ui.ff57b4e718f1" data-pane="list" title="论文列表">📄</button>
+<button class="lt" data-i18n-title="ui.b90f6029b1e9" data-pane="viewer" title="PDF 预览">👁</button>
+<button class="lt" data-i18n-title="ui.d6432698ed8a" data-pane="chat" title="对话栏">💬</button>
+</div>
+<div class="top-actions">
+<label class="language-control"><span data-i18n="ui.0703309cb1bb">输出语言 </span><select aria-label="输出语言" data-i18n-aria-label="ui.0703309cb1bb" id="output-language"><option data-i18n="ui.72726d8818f6" value="zh">中文</option><option value="en">English</option></select></label>
+<button class="ghost" data-i18n="ui.a0ab5987d808" id="open-reviews">综述历史</button>
+<button class="ghost accent" data-i18n="ui.394a97ed6aee" data-i18n-title="ui.13bc699c7412" id="open-search" title="ArXiv 检索 + 智能筛选（结果进待读缓冲区）· ⌘K">🔎 ArXiv 检索</button>
+<button class="ghost" data-i18n="ui.05af30bb8d29" id="open-rules">归档规则</button>
+<button class="ghost" data-i18n="ui.df3d58c7d84b" id="open-settings">设置</button>
+</div>
+</header>
+<div class="toast hidden" id="toast"></div>
+<!-- 三/四栏主体（含可拖拽分隔条） -->
+<main id="layout">
+<!-- 左：文件夹树 -->
+<aside class="pane" data-pane="sidebar" id="sidebar">
+<div class="side-head">
+<span data-i18n="ui.7c7802d8adae">文件夹</span>
+<span class="side-head-ops">
+<button class="mini" data-i18n-title="ui.fb641318480e" id="new-folder" title="新建顶层文件夹">＋</button>
+<button class="mini pane-hide" data-hide="sidebar" data-i18n-title="ui.578799945054" title="隐藏此栏">«</button>
+</span>
+</div>
+<div class="folder-row all selected" id="folder-all">
+<span class="fname" data-i18n="ui.c4fb397688ed">全部论文</span><span class="count" id="all-count">0</span>
+</div>
+<input aria-label="搜索目录" data-i18n-aria-label="ui.d64f2d47146a" data-i18n-placeholder="ui.9b441999b0b4" id="folder-search" placeholder="搜索目录路径…" type="search"/>
+<div aria-label="论文文件夹" data-i18n-aria-label="ui.38c598ba6b40" id="folder-tree" role="tree"></div>
+</aside>
+<div class="resizer" data-for="sidebar" data-i18n-title="ui.4936962c407a" id="rz-sidebar" title="拖拽调整宽度"></div>
+<!-- 中：论文列表 + PDF 预览 -->
+<section id="center">
+<div class="pane" data-pane="list" id="list-pane">
+<div class="pane-head">
+<span data-i18n="ui.916a0b17530c">论文</span>
+<button class="mini pane-hide" data-hide="list" data-i18n-title="ui.578799945054" title="隐藏此栏">«</button>
+</div>
+<nav aria-label="当前目录" data-i18n="ui.c4fb397688ed" data-i18n-aria-label="ui.257f4442af73" id="folder-breadcrumb">全部论文</nav>
+<div class="folder-scope hidden" id="folder-scope"><label><input id="only-current" type="checkbox"/><span data-i18n="ui.ddb1f51e0dd0">仅当前层</span></label><button class="mini" data-i18n="ui.89629f66e026" id="folder-review">生成综述</button></div>
+<input autocomplete="off" data-i18n-placeholder="ui.979f5b6b497e" id="search" placeholder="搜索标题 / 摘要 / 作者…" type="text"/>
+<div id="paper-list"></div>
+</div>
+<div class="resizer" data-for="list" data-i18n-title="ui.4936962c407a" id="rz-list" title="拖拽调整宽度"></div>
+<div class="pane" data-pane="viewer" id="viewer-pane">
+<div class="viewer-toolbar hidden" id="viewer-toolbar">
+<span class="v-title" id="viewer-title"></span>
+<span class="v-ops">
+<button class="mini" data-i18n="ui.f5f45eb6be45" data-i18n-title="ui.00ceef0b4b87" id="run-pipeline" title="对这篇论文跑知识网络：快速总结 → 唯一分类 → 深度精读 → 论文关系（产物在右栏页签里查看）">🧠 知识网络</button>
+<button class="mini" data-i18n="ui.1b479fbe937b" data-i18n-title="ui.bea87d37cedf" id="run-related" title="智能关联检索：读当前论文的 Related Work / 参考文献，自动到 arXiv 检索并筛选强相关论文（可一键加入详细阅读）">🔗 智能关联检索</button>
+<button class="mini" data-i18n="ui.ee4421ed1423" data-i18n-title="ui.4d387b9b93c4" id="move-paper" title="移动到其它文件夹">📁 移动</button>
+<button class="mini" data-i18n="ui.70fd92e91513" data-i18n-title="ui.550b9534d795" id="reextract-paper" title="重新抽取 PDF 全文">↻ 重抽全文</button>
+<button class="mini danger" data-i18n="ui.4578951a8e18" data-i18n-title="ui.63f99a3c2164" id="delete-paper" title="从库中删除">🗑 删除</button>
+<button class="mini pane-hide" data-hide="viewer" data-i18n-title="ui.578799945054" title="隐藏此栏">«</button>
+</span>
+</div>
+<div id="viewer-body">
+<div class="empty rich" id="viewer-empty">
+<div class="icon">📖</div>
+<div class="t" data-i18n="ui.e832cf8180a2">选一篇论文开始阅读</div>
+<div class="h" data-i18n="ui.261ac60ecd0d">选择文件夹查看其全部后代论文；选择论文阅读 PDF、笔记或提问。文件夹菜单可生成综述。</div>
+</div>
+<!-- PDF 自绘查看器：服务端逐页渲染图片 + 原生 JS 缩放（滚轮 / 触控板捏合）。
+               不再用浏览器内置 iframe viewer：它无法从外部控制缩放，而项目约定前端零第三方依赖。 -->
+<div class="hidden" id="pdf-viewer">
+<div id="pdfv-bar">
+<button class="mini" data-i18n-title="ui.d99f8f9724a3" id="pdfv-out" title="缩小（鼠标滚轮向下 / 触控板捏合）">−</button>
+<button class="mini pdfv-zoom" data-i18n-title="ui.bd63cb717642" id="pdfv-label" title="当前缩放（100% = 实际尺寸）；点击重置为适应宽度">100%</button>
+<button class="mini" data-i18n-title="ui.183286ef9b96" id="pdfv-in" title="放大（鼠标滚轮向上 / 触控板捏合）">＋</button>
+<button class="mini" data-i18n="ui.ac11eac9162f" data-i18n-title="ui.5543fae13df2" id="pdfv-fit" title="缩放至适应预览栏宽度">适应宽度</button>
+<span class="pdfv-hint" id="pdfv-pageno">1 / 1</span>
+<span class="spacer"></span>
+<button class="mini on" data-i18n="ui.1319f2cd3495" data-i18n-title="ui.7581dcc33ea8" id="pdfv-wheel" title="切换滚轮行为：缩放（默认）/ 滚动；触控板捏合始终缩放">🖱 滚轮: 缩放</button>
+<a class="mini" data-i18n="ui.580bc838d52c" data-i18n-title="ui.6506c255cffd" href="#" id="pdfv-native" rel="noopener noreferrer" target="_blank" title="用浏览器内置阅读器打开（支持文本选择 / 搜索 / 打印）">↗ 原生</a>
+</div>
+<div id="pdfv-scroll"><div id="pdfv-pages"></div></div>
+</div>
+<div class="hidden" id="graph-view">
+<div id="graph-head">
+<span class="g-path" id="graph-path"></span>
+<span class="g-ops">
+<a class="mini" data-i18n="ui.edca595193b5" data-i18n-title="ui.180d3f4b2f14" href="#" id="graph-md-link" rel="noopener" target="_blank" title="独立阅读">↗ 阅读</a>
+<button class="mini" data-i18n="ui.b4253bf169a8" id="graph-toggle">辅助图</button>
+<button class="mini" data-i18n="ui.5ca86ef6685e" data-i18n-title="ui.6d883373bc7c" id="graph-refresh" title="重新加载论文关系与历史文档">↻ 刷新</button>
+<button class="mini" data-i18n="ui.6bd615a27a76" data-i18n-title="ui.cb0bff95e195" id="graph-export" title="重建文件夹与每个节点的 GRAPH.md">⇪ 重建文件</button>
+<button class="mini danger" data-i18n="ui.6e9c6a3ab10c" data-i18n-title="ui.22a855003a0d" id="graph-del" title="删除该方向节点（论文保留）">🗑 删除方向</button>
+</span>
+</div>
+<div class="hint" id="graph-meta"></div>
+<div class="graph-legend hidden" id="graph-legend"></div>
+<div class="relation-controls"><select aria-label="按关系筛选" data-i18n-aria-label="ui.f49e275326c1" id="relation-filter"></select><select aria-label="按论文筛选" data-i18n-aria-label="ui.82278b2ad122" id="relation-paper"></select><button class="mini" id="graph-zoom-in">＋</button><button class="mini" id="graph-zoom-out">−</button><button class="mini" data-i18n="ui.95ac0ce3b08b" id="graph-reset">复位</button></div>
+<div id="relation-cards"></div>
+<div class="hidden" id="graph-svg-box"></div>
+<div class="g-papers" id="graph-papers"></div>
+<details class="graph-md" id="graph-md-box">
+<summary data-i18n="ui.a8032de195d3" id="graph-document-label">论文关系文档（含保留的历史综述）</summary>
+<div class="md" id="graph-md"></div>
+</details>
+</div>
+</div>
+</div>
+</section>
+<div class="resizer" data-for="chat" data-i18n-title="ui.4936962c407a" id="rz-chat" title="拖拽调整宽度"></div>
+<!-- 右：对话阅读 -->
+<aside class="pane" data-pane="chat" id="chat-pane">
+<div id="chat-head">
+<div class="chat-head-top">
+<div data-i18n="ui.e63a45a5fc1e" id="chat-title">未选择论文</div>
+<button class="mini pane-hide" data-hide="chat" data-i18n-title="ui.578799945054" title="隐藏此栏">»</button>
+</div>
+<div class="ctx-status hidden" id="ctx-status"></div>
+<div class="chat-head-actions">
+<select data-i18n-title="ui.1115a951ea4a" id="session-select" title="切换会话"></select>
+<button class="mini" data-i18n-title="ui.58e21b8737cc" id="new-session" title="新建会话">＋</button>
+</div>
+</div>
+<div class="pipeline-panel hidden" id="pipeline-panel"></div>
+<!-- 阅读产物：对话 / 快速总结 / 深度精读 三个页签（产物由知识网络 pipeline 生成） -->
+<div class="artifact-tabs" id="artifact-tabs">
+<button class="art-tab active" data-i18n="ui.db62e99b6396" data-i18n-title="ui.3b12e640213a" data-view="chat" title="与论文对话">💬 对话</button>
+<button class="art-tab" data-i18n-title="ui.a047223da884" data-view="summary" title="快速总结：洞察、贡献、结论（含“解决了什么 / 未来展望”）"><span data-i18n="ui.a09e7472cd41">🧾 快速总结</span><span class="art-meta"></span></button>
+<button class="art-tab" data-i18n-title="ui.cebb24bde301" data-view="deep_reading" title="深度精读：论文背景、详细方法、详细实验、Insight 与价值、不足与未来展望"><span data-i18n="ui.ce4541f9f7b8">📖 深度精读</span><span class="art-meta"></span></button>
+</div>
+<div class="artifact-view hidden" id="artifact-view">
+<div class="av-head">
+<span class="av-title" id="av-title"></span>
+<span class="av-meta" id="av-meta"></span>
+<span class="av-ops">
+<select aria-label="阅读产物版本 / Reading version" data-i18n-aria-label="ui.79b458781d47" id="av-version"><option data-i18n="ui.c2a497830ef7" value="">最新版本</option></select>
+<button class="mini" data-i18n="ui.0d766e2349d1" data-i18n-title="ui.1c71cd1c9e84" id="av-copy" title="复制全文 Markdown">⧉ 复制</button>
+<button class="mini" data-i18n="ui.88f1efbddc6f" data-i18n-title="ui.b34e30106b47" id="av-open" title="独立阅读页">↗ 新窗口</button>
+<button class="mini" data-i18n="ui.6aa9c09687c9" id="av-download">下载 Markdown</button>
+<button class="mini" data-i18n="ui.30e98c97a40d" id="av-focus">专注阅读</button>
+<button class="mini" data-i18n="ui.6bff395c55fc" data-i18n-title="ui.e5bbeeb334a3" id="av-regen" title="按当前语言重新生成，旧版本归档保留">↻ 重新生成</button>
+<button class="mini" data-i18n-title="ui.a78e4243c033" id="av-close" title="回到对话">✕</button>
+</span>
+</div>
+<div class="av-body md" id="av-body"></div>
+</div>
+<div id="messages">
+<div class="empty rich">
+<div class="icon">💬</div>
+<div class="t" data-i18n="ui.cabc68613c6e">就论文提问</div>
+<div class="h" data-i18n="ui.d2122f84384c">选中论文后，全文会进入对话上下文。试试问：这篇论文解决了什么问题？核心方法是什么？</div>
+</div>
+</div>
+<div id="chat-input-row">
+<textarea data-i18n-placeholder="ui.dd716d62eec9" id="chat-input" placeholder="就这篇论文提问…（Enter 发送，Shift+Enter 换行）" rows="2"></textarea>
+<button class="primary" data-i18n="ui.edecf0ae6e51" id="send-btn">发送</button>
+</div>
+</aside>
+</main>
+<!-- 移动论文弹窗 -->
+<div class="modal hidden" id="move-modal">
+<div class="modal-card">
+<div class="modal-head"><span data-i18n="ui.23734d6398d5">移动论文到文件夹</span><button class="mini" data-close="move-modal">✕</button></div>
+<div class="modal-body">
+<div class="hint" id="move-paper-title"></div>
+<label><span data-i18n="ui.388a187b4384">目标文件夹</span><select id="move-folder"></select></label>
+</div>
+<div class="modal-foot">
+<span class="spacer"></span>
+<button class="ghost" data-close="move-modal" data-i18n="ui.2cd0f3be8738">取消</button>
+<button class="primary" data-i18n="ui.fc6bb436b8ca" id="move-confirm">移动</button>
+</div>
+</div>
+</div>
+<!-- 设置弹窗 -->
+<div class="modal hidden" id="settings-modal">
+<div class="modal-card">
+<div class="modal-head"><span data-i18n="ui.6bf5b453adcb">LLM 设置（OpenAI 兼容）</span><button class="mini" data-close="settings-modal">✕</button></div>
+<div class="modal-body">
+<label><span data-i18n="ui.0703309cb1bb">输出语言</span><select id="set-language"><option data-i18n="ui.72726d8818f6" value="zh">中文</option><option value="en">English</option></select></label>
+<label>API Base URL<input id="set-base-url" placeholder="https://api.openai.com/v1" type="text"/></label>
+<label>API Key<input autocomplete="off" data-i18n-placeholder="ui.4527d959b5ad" id="set-api-key" placeholder="留空表示不修改" type="password"/></label>
+<div class="hint" id="key-hint"></div>
+<label><span data-i18n="ui.cb2f1709f983">模型名称</span><input id="set-model" placeholder="gpt-4o-mini / qwen-plus / deepseek-chat" type="text"/></label>
+<details><summary data-i18n="ui.a42c8d6a892a">高级参数</summary>
+<div class="row">
+<label>temperature<input id="set-temperature" max="2" min="0" step="0.1" type="number"/></label>
+<label>max_tokens<input id="set-max-tokens" min="1" step="256" type="number"/></label>
+<label>top_p<input id="set-top-p" max="1" min="0" step="0.05" type="number"/></label>
+</div>
+<div class="row">
+<label><span data-i18n="ui.c8c14507b2d3">推理强度</span><select id="set-reasoning"><option data-i18n="ui.4d1807d40503" value="">服务默认值</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option><option value="max">max</option></select></label>
+<label><span data-i18n="ui.e814e078437b">超时（秒）</span><input id="set-timeout" max="3600" min="5" type="number"/></label>
+<label><span data-i18n="ui.9f28a8874c78">重试次数</span><input id="set-retries" max="10" min="0" type="number"/></label>
+</div>
+<p class="hint" data-i18n="ui.18da2d39aabe">采样参数留空时使用模型服务默认值。</p></details>
+<p class="hint" data-i18n="ui.5c3eddea3976">测试连接会发送一次模型请求，可能计费；不会自动保存设置。</p>
+<div class="hidden" id="desktop-storage"><p class="hint" id="storage-path"></p><button class="ghost" data-i18n="ui.f2ec38914b2d" id="storage-open">打开资料目录</button><button class="ghost" data-i18n="ui.ae4217e96d7d" id="storage-select">选择已有资料库</button><p class="hint" data-i18n="ui.ab12b2196651">切换资料库将在下次启动生效，不移动或删除原有资料。</p></div>
+<div class="hint" id="settings-test-result"></div>
+</div>
+<div class="modal-foot">
+<button class="ghost" data-i18n="ui.0a98a48eaaac" id="test-llm">测试连接</button>
+<span class="spacer"></span>
+<button class="ghost" data-close="settings-modal" data-i18n="ui.2cd0f3be8738">取消</button>
+<button class="primary" data-i18n="ui.a3030bf8f16d" id="save-settings">保存</button>
+</div>
+</div>
+</div>
+<!-- 规则弹窗 -->
+<div class="modal hidden" id="rules-modal">
+<div class="modal-card wide">
+<div class="modal-head"><span data-i18n="ui.8ab1290cb19f">自动归档规则</span><button class="mini" data-close="rules-modal">✕</button></div>
+<div class="modal-body">
+<p class="hint" data-i18n="ui.e5121f69f67d">入库论文若未手动指定文件夹，则按 priority 升序匹配下列启用规则，首条命中即归档；都不命中则进入 Inbox。</p>
+<div class="rule-form">
+<input data-i18n-placeholder="ui.43e970538e0c" id="rule-name" placeholder="规则名（可选）" type="text"/>
+<select id="rule-type">
+<option data-i18n="ui.ff7ff4eda468" value="category">分类 category</option>
+<option data-i18n="ui.57c7c898e997" value="keyword">关键词 keyword</option>
+<option data-i18n="ui.4cc132f2d0b4" value="author">作者 author</option>
+<option data-i18n="ui.b582a91ca465" value="title">标题 title</option>
+</select>
+<input data-i18n-placeholder="ui.e8c5dca1aa58" id="rule-pattern" placeholder="匹配值，如 cs.CL / diffusion / Bengio" type="text"/>
+<select id="rule-folder"></select>
+<input data-i18n-title="ui.39ecf28f8be5" id="rule-priority" title="priority，越小越先" type="number" value="100"/>
+<button class="primary" data-i18n="ui.c9f9e18b0623" id="add-rule">添加规则</button>
+</div>
+<div id="rule-list"></div>
+</div>
+<div class="modal-foot">
+<span class="spacer"></span>
+<button class="ghost" data-close="rules-modal" data-i18n="ui.3fd47edce45b">关闭</button>
+</div>
+</div>
+</div>
+<!-- ArXiv 检索（检索 -> 预筛 -> 总结验证 -> 缓冲区） -->
+<div class="modal hidden" id="search-modal">
+<div class="modal-card search-wide">
+<div class="modal-head">
+<span data-i18n="ui.0feee18caf5a">ArXiv 检索 · 智能筛选</span>
+<span class="head-hint" data-i18n="ui.5dcb1b6d74bd">标题与摘要先过筛，把时间留给值得读的论文</span>
+<button class="mini" data-close="search-modal">✕</button>
+</div>
+<div class="modal-body search-body">
+<div class="search-left">
+<div class="search-form">
+<label><span data-i18n="ui.fe38168afb70">日期从</span><input id="s-date-from" type="date"/></label>
+<label><span data-i18n="ui.b56f36b529db">到</span><input id="s-date-to" type="date"/></label>
+<label><span data-i18n="ui.ede32547e809">最多条数</span><input id="s-max" max="500" min="1" type="number" value="40"/></label>
+<label><span data-i18n="ui.6e451fdbe2c8">预筛阈值</span><input id="s-min-score" max="1" min="0" step="0.05" type="number" value="0.55"/></label>
+<label><span data-i18n="ui.b888f4dfaabe">复核上限</span><input id="s-max-sum" max="50" min="0" type="number" value="12"/></label>
+</div>
+<div class="search-cats" id="s-cats"></div>
+<div class="search-kw">
+<input data-i18n-placeholder="ui.b033a9acb4c3" id="s-keywords" placeholder="关键词（空格或逗号分隔），如：credit assignment, variance" type="text"/>
+<select data-i18n-title="ui.3bb31f40ffcb" id="s-kw-mode" title="多个关键词之间的关系">
+<option data-i18n="ui.27cdec84a50e" value="and">全部命中 (AND)</option>
+<option data-i18n="ui.c1738a4324b3" value="or">任一命中 (OR)</option>
+</select>
+</div>
+<div class="search-actions">
+<span class="hint" data-i18n="ui.f6bc85c4253c" id="s-hint">Step1 只取标题与摘要（不下载全文）；Step2 读方向树预筛；Step3 对过线论文跑快速总结并复核归属；Step4 写入待读缓冲区。</span>
+</div>
+<div class="hidden" id="s-progress">
+<div class="stage-row" id="s-stages"></div>
+<div class="progress"><div class="progress-bar" id="s-bar"></div></div>
+<div class="hint" id="s-counters"></div>
+<div class="search-logs" id="s-logs"></div>
+</div>
+</div>
+<div class="search-results">
+<div class="results-head">
+<span data-i18n="ui.0721bb3c31f7">匹配论文（待读缓冲区）</span>
+<span class="hint" id="s-buffer-counts"></span>
+</div>
+<div class="batch-bar hidden" id="s-batch-bar">
+<label class="b-all" data-i18n-title="ui.534d4eed878c" title="全选 / 取消全选本页可选论文"><input id="s-select-all" type="checkbox"/><span data-i18n="ui.3a5040b68abf"> 全选</span></label>
+<button class="mini danger" data-i18n="ui.29670536129f" disabled="" id="s-batch-reject">批量丢弃</button>
+<span class="hint" data-i18n="ui.f4394c85673a" id="s-batch-hint">勾选论文后可一次丢弃</span>
+</div>
+<div id="s-buffer"></div>
+</div>
+</div>
+<div class="modal-foot">
+<button class="primary" data-i18n="ui.2c4df6410298" id="s-run">开始检索</button>
+<button class="ghost hidden" data-i18n="ui.888029ea124d" id="s-cancel">中断检索</button>
+<span class="hint foot-hint" data-i18n="ui.5ece8f0f9930">「加入详细阅读」会下载全文并跑：快速总结 → 唯一分类 → 深度精读 → 论文关系</span>
+<span class="spacer"></span>
+<button class="ghost" data-close="search-modal" data-i18n="ui.3fd47edce45b">关闭</button>
+</div>
+</div>
+</div>
+<div class="ctx-menu hidden" id="ctx-menu"></div>
+<!-- 智能关联检索（Related Work -> 候选论文 -> 加入详细阅读） -->
+<div class="modal hidden" id="related-modal">
+<div class="modal-card search-wide">
+<div class="modal-head">
+<span data-i18n="ui.f443837527ec" id="related-heading">智能关联检索</span>
+<span class="head-hint" id="related-head-hint"></span>
+<button class="mini" data-close="related-modal">✕</button>
+</div>
+<div class="modal-body search-body">
+<div class="search-left">
+<div class="hint" data-i18n="ui.f75a46c9e380" id="related-intro">引用定位与主题扩展两路检索：先用完整摘要批量筛选，再总结保留项。默认最多 20 个引用、6 组主题、120 篇候选；首轮最多保留 30 篇，可继续筛选。失败和待核实项可重试，不视为不相关。</div>
+<div class="hidden" id="r-progress">
+<div class="stage-row" id="r-stages"></div>
+<div class="progress"><div class="progress-bar" id="r-bar"></div></div>
+<div class="hint" id="r-counters"></div>
+<div class="search-logs" id="r-logs"></div>
+</div>
+</div>
+<div class="search-results">
+<div class="results-head">
+<span data-i18n="ui.97ede34610b3" id="related-candidates-heading">候选论文 · 四档相关性</span><label><input id="r-show-discarded" type="checkbox"/><span data-i18n="ui.d4cab90760c8" id="related-discarded-label">显示已丢弃</span></label>
+<span class="hint" id="r-counts"></span>
+</div>
+<div id="r-buffer"></div>
+</div>
+</div>
+<div class="modal-foot">
+<button class="primary" data-i18n="ui.fc6cf5b5e6cd" id="r-run">开始智能关联检索</button>
+<button class="ghost hidden" data-i18n="ui.888029ea124d" id="r-cancel">中断检索</button>
+<button class="ghost" data-i18n="ui.a459928ae272" id="r-continue">继续筛选</button>
+<button class="ghost" data-i18n="ui.7b04cee51d11" id="r-retry">重试失败 / 待核实</button>
+<span class="hint foot-hint" data-i18n="ui.f1bb9064ed8c">入库后复用同语言、同版本总结，继续分类、精读和关系；综述由文件夹菜单手动生成。</span>
+<span class="spacer"></span>
+<button class="ghost" data-close="related-modal" data-i18n="ui.3fd47edce45b">关闭</button>
+</div>
+</div>
+</div>
+<!-- 通用确认 / 输入弹窗（替代原生 prompt / confirm：沙箱环境会禁用原生弹窗） -->
+<div class="modal hidden" id="dialog-modal">
+<div class="modal-card dialog-card">
+<div class="modal-head">
+<span data-i18n="ui.36f33adaf094" id="dlg-title">确认</span>
+<span class="head-hint"></span>
+<button class="mini" data-close="dialog-modal">✕</button>
+</div>
+<div class="modal-body">
+<div class="dlg-message" id="dlg-message"></div>
+<label class="hidden" id="dlg-input-wrap">
+<span data-i18n="ui.d44e9b3d3b31" id="dlg-input-label">名称</span>
+<input autocomplete="off" id="dlg-input" type="text"/>
+</label>
+</div>
+<div class="modal-foot">
+<span class="spacer"></span>
+<button class="ghost" data-i18n="ui.2cd0f3be8738" id="dlg-cancel">取消</button>
+<button class="primary" data-i18n="ui.fac2a67ad878" id="dlg-ok">确定</button>
+</div>
+</div>
+</div>
+<div class="modal hidden" id="review-modal">
+<div class="modal-card review-wide">
+<div class="modal-head"><span data-i18n="ui.9fb5c0f1c624" id="review-heading">文件夹综述</span><button class="mini" data-close="review-modal">✕</button></div>
+<div class="modal-body">
+<div class="hidden" id="review-form">
+<div class="hint" id="review-preview"></div>
+<label><span data-i18n="ui.32babca23e6d" id="review-title-label">综述标题</span><input id="review-title" maxlength="500"/></label>
+<label><span data-i18n="ui.b0a699ea351a" id="review-focus-label">关注问题</span><textarea id="review-focus" maxlength="8000" rows="3"></textarea></label>
+<label><span data-i18n="ui.b417a8d7745b" id="review-language-label">本次语言</span><select id="review-language"><option data-i18n="ui.72726d8818f6" value="zh">中文</option><option value="en">English</option></select></label>
+<button class="primary" data-i18n="ui.84597d38d3e6" id="review-create">确认快照并生成</button>
+</div>
+<div id="review-history"></div>
+<div class="hint" id="review-progress"></div>
+<div class="reading-actions" id="review-actions"></div>
+<article class="md" id="review-content"></article>
+</div>
+</div>
+</div>
+<script src="/vendor/markdown-it/markdown-it.min.js"></script>
+<script src="/vendor/dompurify/purify.min.js"></script>
+<script src="/vendor/katex/katex.min.js"></script>
+<script src="/i18n.js"></script>
+<script src="/desktop.js"></script>
+<script src="/renderer.js"></script>
+<script src="/app.js"></script>
 </body>
 </html>
+

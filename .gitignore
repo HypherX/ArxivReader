@@ -4,16 +4,31 @@ __pycache__/
 .venv/
 venv/
 
-# 本地配置（含密钥），不入库
-config.py
+# 仅忽略根目录的私人模型配置（harness/config.py 是运行必需代码）
+/config.py
 
-# 运行时数据：SQLite 数据库 + 下载的 PDF + 抽取缓存
+# 运行时数据：SQLite 数据库 + 下载的 PDF + 图谱 md（首次启动后自动生成）
 data/
+runs/
+reading-preview-*/
 
 *.log
 .DS_Store
 .idea/
 .vscode/
 
-# pytest
+# 构建产物及隔离工具（分发包单独交付，不进入源码仓库）
+dist/
+.build-*/
+.desktop-inspect/
+.release-tools/
+.release-verification/
+.native-verification/
+.i18n-*.json
+
+# 运行、验证缓存
 .pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml

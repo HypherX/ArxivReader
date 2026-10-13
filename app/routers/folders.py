@@ -2,6 +2,8 @@
 
 删除文件夹时，其子文件夹与论文上移到父级（顶层则移入 Inbox），不做级联删除，
 避免误删论文。Inbox 为系统默认文件夹，禁止删除。
+
+方向文件夹通过稳定节点 ID 关联分类；移动、改名、删除统一维护子树路径和唯一归属。
 """
 
 from typing import Dict, List
@@ -10,8 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from .. import database, schemas
-from ..models import Folder, Paper
+from knowledge import store as knowledge_store, translation
+
+from .. import database, schemas, settings_store
+from ..models import DirectionNode, Folder, Paper
 
 router = APIRouter(prefix="/api/folders", tags=["folders"])
 
@@ -25,11 +29,13 @@ def _paper_counts(db: Session) -> Dict[int, int]:
     return counts
 
 
-def _build_tree(folders: List[Folder], counts: Dict[int, int]) -> List[schemas.FolderNode]:
+def _build_tree(folders: List[Folder], counts: Dict[int, int], aliases=None, inbox_id=None) -> List[schemas.FolderNode]:
     nodes = {
         f.id: schemas.FolderNode(
             id=f.id, name=f.name, parent_id=f.parent_id,
-            paper_count=counts.get(f.id, 0), children=[],
+            system_kind="inbox" if f.id == inbox_id else "",
+            paper_count=counts.get(f.id, 0), direction_node_id=f.direction_node_id,
+            children=[],
         )
         for f in folders
     }
@@ -41,10 +47,13 @@ def _build_tree(folders: List[Folder], counts: Dict[int, int]) -> List[schemas.F
         else:
             roots.append(node)
 
-    def sort_rec(items: List[schemas.FolderNode]) -> None:
+    def sort_rec(items: List[schemas.FolderNode], prefix: str = "") -> None:
         items.sort(key=lambda n: n.name.lower())
         for n in items:
-            sort_rec(n.children)
+            n.path = (prefix + "/" if prefix else "") + n.name
+            n.display_name = (aliases or {}).get(n.direction_node_id, n.name)
+            sort_rec(n.children, n.path)
+            n.subtree_paper_count = n.paper_count + sum(c.subtree_paper_count for c in n.children)
 
     sort_rec(roots)
     return roots
@@ -66,14 +75,17 @@ def _is_descendant(db: Session, node_id: int, ancestor_id: int) -> bool:
 @router.get("", response_model=List[schemas.FolderNode])
 def list_folders(db: Session = Depends(database.get_db)):
     folders = db.query(Folder).all()
-    return _build_tree(folders, _paper_counts(db))
+    aliases = translation.node_aliases(db, settings_store.get_output_language(db))
+    return _build_tree(folders, _paper_counts(db), aliases, database.ensure_inbox(db).id)
 
 
 @router.post("", response_model=schemas.FolderOut, status_code=201)
 def create_folder(body: schemas.FolderCreate, db: Session = Depends(database.get_db)):
     name = body.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="文件夹名不能为空")
+    if not name or "/" in name or name in (".", ".."):
+        raise HTTPException(status_code=400, detail="文件夹名不能为空或包含路径分隔符")
+    if db.query(Folder).filter_by(name=name, parent_id=body.parent_id).first():
+        raise HTTPException(status_code=409, detail="同级已存在同名文件夹")
     if body.parent_id is not None and db.get(Folder, body.parent_id) is None:
         raise HTTPException(status_code=404, detail="父文件夹不存在")
     folder = Folder(name=name, parent_id=body.parent_id)
@@ -91,23 +103,15 @@ def update_folder(folder_id: int, body: schemas.FolderUpdate,
         raise HTTPException(status_code=404, detail="文件夹不存在")
 
     fields = body.model_fields_set
-    if "name" in fields and body.name is not None:
-        name = body.name.strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="文件夹名不能为空")
-        folder.name = name
-    if "parent_id" in fields:
-        new_parent = body.parent_id
-        if new_parent == folder_id:
-            raise HTTPException(status_code=400, detail="不能把文件夹设为自己的子文件夹")
-        if new_parent is not None:
-            if db.get(Folder, new_parent) is None:
-                raise HTTPException(status_code=404, detail="父文件夹不存在")
-            if _is_descendant(db, new_parent, folder_id):
-                raise HTTPException(status_code=400, detail="不能移动到自身的子文件夹下")
-        folder.parent_id = new_parent
-
-    db.commit()
+    if folder.id == database.ensure_inbox(db).id:
+        raise HTTPException(status_code=400, detail="系统 Inbox 不能移动或改名")
+    name = body.name if "name" in fields and body.name is not None else folder.name
+    parent_id = body.parent_id if "parent_id" in fields else folder.parent_id
+    try:
+        knowledge_store.update_folder_location(db, folder, name, parent_id)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
     db.refresh(folder)
     return folder
 
@@ -117,18 +121,11 @@ def delete_folder(folder_id: int, db: Session = Depends(database.get_db)):
     folder = db.get(Folder, folder_id)
     if folder is None:
         raise HTTPException(status_code=404, detail="文件夹不存在")
-    if folder.name == database.INBOX_NAME and folder.parent_id is None:
+    if folder.id == database.ensure_inbox(db).id:
         raise HTTPException(status_code=400, detail="Inbox 为系统默认文件夹，不能删除")
-
-    new_parent_id = folder.parent_id
-    if new_parent_id is None:
-        inbox = database.ensure_inbox(db)
-        new_parent_id = inbox.id if inbox.id != folder_id else None
-
-    db.query(Folder).filter(Folder.parent_id == folder_id).update(
-        {"parent_id": new_parent_id}, synchronize_session=False)
-    db.query(Paper).filter(Paper.folder_id == folder_id).update(
-        {"folder_id": new_parent_id}, synchronize_session=False)
-    db.delete(folder)
-    db.commit()
+    try:
+        knowledge_store.delete_folder(db, folder)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc))
     return Response(status_code=204)

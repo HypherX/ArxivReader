@@ -1,0 +1,72 @@
+/* 所有阅读入口共用排版；字体全部为本地系统字体或随 KaTeX 打包。 */
+.md { font-size: 15px; line-height: 1.85; overflow-wrap: anywhere; color: #243249; }
+.md h1,.md h2,.md h3 { line-height: 1.45; margin: 1.5em 0 .7em; scroll-margin-top: 18px; }
+.md h1 { font-size: 1.65em; } .md h2 { font-size: 1.35em; } .md h3 { font-size: 1.12em; }
+.md p { margin: .8em 0; } .md ul,.md ol { padding-left: 1.8em; } .md li { margin: .3em 0; }
+.md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.md th,.md td { border: 1px solid #dce2eb; padding: 8px 12px; min-width: 90px; }
+.md th { background: #f3f6fb; } .md blockquote { margin: 1em 0; border-left: 3px solid #97a9c8; padding: .2em 1em; color: #546480; }
+.md pre { position: relative; white-space: pre; overflow-x: auto; padding: 32px 16px 16px; background: #f3f5f9; border: 1px solid #e2e7ee; border-radius: 8px; }
+.md pre code { background: none; padding: 0; white-space: pre; }
+.md code { font-size: .9em; } .md .code-copy { position: absolute; top: 5px; right: 8px; font: 11px system-ui; cursor: pointer; }
+.md .katex-display { overflow-x: auto; overflow-y: hidden; padding: .5em 0; max-width: 100%; }
+.md .katex { font-size: 1.1em; } .md .math-error { white-space: pre-wrap; color: #986213; }
+.math-warning { display: inline-block; color: #986213; margin-left: 6px; font: 11px system-ui; }
+.reading-toc { margin: 12px 0 20px; padding: 12px 18px; border: 1px solid #dce2eb; border-radius: 10px; }
+.reading-toc a { display: block; font-size: 13px; padding: 2px 0; } .reading-toc summary { cursor: pointer; }
+.av-body > .md, #review-content { max-width: 82ch; margin-inline: auto; }
+.reading-focus #artifact-view { position: fixed; inset: 16px max(16px, calc((100vw - 960px)/2)); z-index: 80; background: white; border: 1px solid #dce2eb; box-shadow: 0 0 0 100vmax #edf1f8ed; border-radius: 12px; }
+.reading-focus .av-body { max-width: 86ch; width: 100%; margin: auto; }
+.reader-page { margin: 0; background: #f6f8fb; font-family: system-ui, sans-serif; }
+.reader-page header { position: sticky; top: 0; z-index: 2; padding: 12px 24px; background: #ffffffef; border-bottom: 1px solid #dce2eb; display: flex; gap: 16px; align-items: center; }
+.reader-page article { max-width: 82ch; margin: 30px auto; padding: 28px 40px; background: white; border: 1px solid #e2e7ee; border-radius: 12px; }
+.reader-page #reader-meta { max-width: 82ch; margin: 16px auto; color: #66758b; padding: 0 20px; }
+.reader-page.focus header { position: static; } .reader-page.focus article { border: 0; }
+.language-control { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; }
+.language-control select { max-width: 96px; }
+#folder-search { width: 100%; margin: 8px 0; padding: 8px; }
+#folder-tree .folder-row { padding: 7px 4px 7px calc(4px + var(--folder-depth)*19px); gap: 5px; border-radius: 7px; min-height: 38px; position: relative; }
+#folder-tree .folder-row::before { content: ''; position: absolute; top: 0; bottom: 0; left: calc(var(--folder-depth)*19px); border-left: 1px solid #dce2eb; }
+.folder-icon { width: 18px; height: 18px; stroke: #62799b; fill: none; stroke-width: 1.6; flex-shrink: 0; }
+.folder-toggle { background: none; border: 0; width: 18px; color: #687991; cursor: pointer; padding: 0; }
+.folder-menu { padding: 0 4px; opacity: .45; } .folder-row:hover .folder-menu,.folder-row:focus-within .folder-menu { opacity: 1; }
+.folder-row .count { font-size: 10px; white-space: nowrap; } .folder-row .fname { overflow: hidden; text-overflow: ellipsis; }
+#folder-breadcrumb { padding: 4px 12px; font-size: 12px; color: #657790; }
+.folder-scope { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 6px 12px; }
+.folder-scope label { font-size: 12px; white-space: nowrap; } .folder-scope input { width: auto; }
+.review-wide { width: min(1080px, 94vw); } #review-form { padding: 12px; background: #f7f9fc; border-radius: 10px; }
+#review-history { display: grid; gap: 6px; margin: 14px 0; } #review-history button { text-align: left; }
+#review-progress { white-space: pre-wrap; padding: 10px 0; } .reading-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+.relation-controls { display: flex; gap: 8px; padding: 10px; flex-wrap: wrap; } .relation-controls select { max-width: 230px; }
+.relation-card { border: 1px solid #dce2eb; border-radius: 10px; padding: 16px; margin: 10px; background: white; }
+.relation-card .relation-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.relation-card .relation-title button { text-align: left; max-width: 40%; white-space: normal; }
+#graph-svg-box { overflow: auto; max-height: 650px; } .graph-svg { max-width: none; }
+.relation-node { cursor: pointer; } .relation-node rect { fill: #f4f7ff; stroke: #8498c1; }
+.relation-node.selected rect { fill: #e3eaff; stroke: #405ed1; stroke-width: 2; }
+.relation-node text { fill: #314665; font: 12px system-ui; } .relation-edge { stroke: #bdc8d8; fill: none; stroke-width: 1.5; }
+.relation-edge.active { stroke: #536bcd; stroke-width: 3; }
+.reasoning-body { white-space: normal; } .dlg-actions { flex-wrap: wrap; max-height: 45vh; overflow: auto; }
+#folder-tree .folder-row:hover .count { display: inline-block; }
+#av-version { max-width: 230px; }
+#chat-pane.collapsed { display: none !important; }
+@media (max-width: 1100px) {
+  body:not(.reader-page) { display: flex; flex-direction: column; }
+  #topbar { height: auto; min-height: 62px; flex-wrap: wrap; padding: 8px 12px; }
+  #layout { flex: 1; min-height: 0; height: auto; }
+  .top-actions { flex-wrap: wrap; }
+  .layout-toggles { display: flex; flex-wrap: wrap; }
+}
+@media (max-width: 820px) {
+  #layout { display: block; overflow-y: auto; }
+  #sidebar { width: 100%; max-height: 240px; }
+  #center { display: block; }
+  #list-pane { width: 100%; height: 320px; }
+  #viewer-pane { height: 480px; }
+  #chat-pane:not(.collapsed) { display: flex !important; width: 100%; height: 720px; min-height: 65vh; }
+  .resizer { display: none !important; }
+  .viewer-toolbar { flex-wrap: wrap; }
+  .viewer-toolbar .v-ops { justify-content: flex-start; }
+  .reader-page article { padding: 18px; margin: 10px; }
+  .reader-page header { flex-wrap: wrap; padding: 10px; }
+}

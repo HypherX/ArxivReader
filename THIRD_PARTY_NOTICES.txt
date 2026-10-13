@@ -1,0 +1,25 @@
+ArxivReader 第三方声明 / Third-party notices
+
+项目本身尚未选择许可证；本文件不授予项目源码或二进制的使用及分发许可。
+No project license has been selected. This notice does not grant rights to the project itself.
+
+PyMuPDF / MuPDF
+PyMuPDF and MuPDF are licensed under the GNU Affero General Public License,
+version 3, or a commercial license from Artifex Software, Inc.
+https://pymupdf.readthedocs.io/en/latest/about.html#license-and-copyright
+https://www.gnu.org/licenses/agpl-3.0.html
+公开分发前必须确认适用的 AGPL 义务或取得所需商业许可。
+Before public distribution, determine the applicable AGPL obligations or obtain a commercial license.
+
+前端资源 / Frontend resources
+markdown-it, DOMPurify, KaTeX and bundled fonts retain their original licenses.
+Exact license texts, versions and checksums are included under static/vendor/.
+
+桌面与 Python 依赖 / Desktop and Python dependencies
+Python, pywebview, PyInstaller and runtime dependencies retain their respective licenses.
+The build script includes installed distribution metadata and license files in
+third_party_licenses/ inside the application. PyInstaller's licensing exception
+applies to its bootloader under the terms included with that distribution.
+这些声明不能替代许可合规确认；未决的项目许可不会因完成本地打包而自动解决。
+These notices do not replace licensing review; local packaging does not resolve
+undecided project licensing or public distribution requirements.
