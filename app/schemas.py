@@ -120,6 +120,11 @@ class LLMSettingsOut(BaseModel):
     request_timeout: float = 300.0
     max_retries: int = 2
     output_language: Literal["zh", "en"] = "zh"
+    # 划词翻译自定义端点；空串 = 跟随主设置
+    seltr_base_url: str = ""
+    seltr_model: str = ""
+    seltr_has_api_key: bool = False
+    seltr_api_key_preview: str = ""
 
 
 class LLMSettingsUpdate(BaseModel):
@@ -135,6 +140,10 @@ class LLMSettingsUpdate(BaseModel):
     reasoning_effort: Optional[Literal["", "low", "medium", "high", "max"]] = None
     request_timeout: Optional[float] = Field(None, ge=5, le=3600)
     max_retries: Optional[int] = Field(None, ge=0, le=10)
+    # 划词翻译自定义端点（seltr.*）；空串 = 清除自定义，跟随主设置
+    seltr_base_url: Optional[str] = None
+    seltr_model: Optional[str] = None
+    seltr_api_key: Optional[str] = None
 
 
 class TestResult(BaseModel):

@@ -264,7 +264,7 @@ def iter_related_events(db: Session, run: RelatedRun, *,
             for seed in seeds:
                 check()
                 try:
-                    key = hashlib.sha256(json.dumps([seed["title"], seed["arxiv_id"], per_seed],
+                    key = hashlib.sha256(json.dumps([seed["title"], seed["arxiv_id"], seed["authors"], per_seed],
                                                     sort_keys=True).encode()).hexdigest()
                     if key in search_cache:
                         hits = [arxiv_search.SearchHit(**hit) for hit in search_cache[key]]
@@ -499,7 +499,7 @@ def promote_related_candidate(db: Session, row: RelatedCandidate, *,
                          categories_json=json.dumps(meta.categories or row.categories,
                                                     ensure_ascii=False),
                          published=meta.published or row.published,
-                         pdf_url=meta.pdf_url, pdf_path=str(pdf_path), folder_id=folder.id,
+                         pdf_url=meta.pdf_url, pdf_path=str(pdf_path), folder_id=None,
                          full_text=text)
         db.add(existing)
         db.commit()

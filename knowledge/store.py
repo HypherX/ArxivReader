@@ -181,6 +181,38 @@ def get_node_papers(db: Session, node: DirectionNode, exclude_paper_id: Optional
     return query.all()
 
 
+def subtree_node_ids(db: Session, node_id: int) -> List[int]:
+    """节点 + 全部后代节点 id。"""
+    ids = [int(node_id)]
+    queue = [int(node_id)]
+    while queue:
+        current = queue.pop()
+        for (child_id,) in db.query(DirectionNode.id).filter(DirectionNode.parent_id == current).all():
+            ids.append(child_id)
+            queue.append(child_id)
+    return ids
+
+
+def get_subtree_papers(db: Session, node: DirectionNode, exclude_paper_id: Optional[int] = None,
+                       limit: Optional[int] = None) -> List[Paper]:
+    """节点子树内的论文：直属论文在前，其余后代节点论文按入库时间倒序接在后面。
+
+    关系抽取用：只对比同节点会漏掉父子/兄弟方向的近邻论文（实测浅分类的论文
+    与深层节点里的高度相关论文完全遇不到，关系图因此过稀）。
+    """
+    direct = get_node_papers(db, node, exclude_paper_id=exclude_paper_id)
+    direct_ids = {p.id for p in direct}
+    query = (db.query(Paper)
+             .join(PaperDirection, PaperDirection.paper_id == Paper.id)
+             .filter(PaperDirection.node_id.in_(subtree_node_ids(db, node.id))))
+    if exclude_paper_id is not None:
+        query = query.filter(Paper.id != exclude_paper_id)
+    deeper = [p for p in query.order_by(Paper.added_at.desc(), Paper.id.desc()).all()
+              if p.id not in direct_ids]
+    merged = direct + deeper
+    return merged[:int(limit)] if limit else merged
+
+
 def paper_memberships(db: Session, paper_id: int) -> List[PaperDirection]:
     """论文的唯一方向归属；普通文件夹中的论文可以没有方向节点。"""
     rows = (db.query(PaperDirection)
@@ -332,7 +364,7 @@ def upsert_edges(db: Session, node_id: int, src_paper_id: int,
         relation = str(item.get("relation") or "").strip().lower()
         if (not dst or dst == src_paper_id or dst in seen or relation not in valid_relations
                 or (allowed is not None and dst not in allowed) or db.get(Paper, dst) is None
-                or str(item.get("direction") or "->") not in ("->", "<->")):
+                or str(item.get("direction") or "->") not in ("->", "<-", "<->")):
             continue
         if allowed is not None and (type(item.get("other_paper_id")) is not int
                 or not isinstance(item.get("rationale"), str) or not item["rationale"].strip()
@@ -365,7 +397,11 @@ def upsert_edges(db: Session, node_id: int, src_paper_id: int,
 def replace_edges(db: Session, direction: PaperDirection, edges, allowed_ids, language, signature):
     """完整结果校验后事务替换此次比对范围，任何非法边都保留原关系。"""
     allowed = set(allowed_ids)
-    current = {d.paper_id for d in db.query(PaperDirection).filter_by(node_id=direction.node_id).all()}
+    # 比对范围是方向子树（见 get_subtree_papers）：一致性校验也按子树成员算。
+    node = db.get(DirectionNode, direction.node_id)
+    subtree = subtree_node_ids(db, direction.node_id) if node is not None else [direction.node_id]
+    current = {d.paper_id for d in db.query(PaperDirection)
+               .filter(PaperDirection.node_id.in_(subtree)).all()}
     if direction.paper_id not in current or not allowed <= current:
         raise ValueError("论文归属在关系抽取期间变化，请重试")
     try:
@@ -453,11 +489,20 @@ def tree_payload(db: Session) -> Dict[str, Any]:
 
 
 def node_payload(db: Session, node: DirectionNode) -> Dict[str, Any]:
-    """单节点详情：论文列表 + 局部图谱（节点/边）+ 综述历史。"""
+    """单节点详情：论文列表 + 局部图谱（节点/边）+ 综述历史。
+
+    关系抽取按子树比对（见 get_subtree_papers），边的另一端常在后代节点里；
+    图谱节点因此取「直属论文 ∪ 边的端点论文」，外部端点标 external=True。
+    """
     directions = (db.query(PaperDirection).filter(PaperDirection.node_id == node.id)
                   .order_by(PaperDirection.created_at.desc()).all())
     papers = [d.paper for d in directions if d.paper is not None]
     paper_ids = {p.id for p in papers}
+
+    all_edges = list_edges(db, node.id)
+    endpoint_ids = {e.src_paper_id for e in all_edges} | {e.dst_paper_id for e in all_edges}
+    extra_ids = endpoint_ids - paper_ids
+    extras = db.query(Paper).filter(Paper.id.in_(extra_ids)).all() if extra_ids else []
 
     graph_nodes = [{
         "id": p.id,
@@ -465,11 +510,21 @@ def node_payload(db: Session, node: DirectionNode) -> Dict[str, Any]:
         "arxiv_id": p.arxiv_id,
         "year": (p.published or "")[:4],
         "role": next((d.role for d in directions if d.paper_id == p.id), "secondary"),
+        "external": False,
         "added_at": _iso(p.added_at),
-    } for p in papers]
+    } for p in papers] + [{
+        "id": p.id,
+        "label": p.title or p.arxiv_id,
+        "arxiv_id": p.arxiv_id,
+        "year": (p.published or "")[:4],
+        "role": "external",
+        "external": True,
+        "added_at": _iso(p.added_at),
+    } for p in extras]
 
-    edges = [e for e in list_edges(db, node.id)
-             if e.src_paper_id in paper_ids and e.dst_paper_id in paper_ids]
+    graph_node_ids = paper_ids | {p.id for p in extras}
+    edges = [e for e in all_edges
+             if e.src_paper_id in graph_node_ids and e.dst_paper_id in graph_node_ids]
     graph_edges = [{
         "id": e.id,
         "source": e.src_paper_id,

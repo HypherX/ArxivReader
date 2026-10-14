@@ -9,4 +9,4 @@ Write a self-contained English Markdown review from the supplied evidence cards.
 6. Consensus and disagreements: distinguish direct evidence, author interpretation and untested hypotheses.
 7. Limitations and opportunities: concrete gaps, actionable tests and prerequisites.
 8. Conclusions: evidence-backed findings and their boundaries.
-The application appends the complete bibliography; do not invent entries. Give methods and experiments most of the space. Explain technical terms, define LaTeX symbols and clearly label any teaching example rather than presenting it as an experiment.
+The application appends the complete bibliography; do not invent entries. The report title is added by the application — do not emit a level-1 heading (# ...); start directly with the scope section. Give methods and experiments most of the space. Explain technical terms, define LaTeX symbols and clearly label any teaching example rather than presenting it as an experiment.

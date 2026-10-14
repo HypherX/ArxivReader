@@ -1,7 +1,7 @@
 """输出语言与提示词版本：无数据库依赖，任务开始时解析一次。"""
 from typing import Any, Dict, Optional
 
-PROMPT_VERSION = "2026-10-readable-v1"
+PROMPT_VERSION = "2026-10-readable-v2"
 
 
 def normalize_language(value: Any) -> str:

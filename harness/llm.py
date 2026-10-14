@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from openai import OpenAI
 
+from . import net
 from .cancel import Cancelled
 
 logger = logging.getLogger(__name__)
@@ -87,11 +88,18 @@ def get_client(settings: LLMSettings) -> OpenAI:
     key = (settings.base_url, settings.api_key, settings.request_timeout)
     client = _CLIENT_CACHE.get(key)
     if client is None:
+        kwargs: Dict[str, Any] = {}
+        if net.is_private_base_url(settings.base_url):
+            # 内网/本机端点走代理必然 502：绕过环境代理直连（公网端点维持 trust_env 默认）
+            import httpx
+            kwargs["http_client"] = httpx.Client(
+                trust_env=False, timeout=httpx.Timeout(settings.request_timeout))
         client = OpenAI(
             base_url=settings.base_url or None,
             api_key=settings.api_key or "EMPTY",
             timeout=settings.request_timeout,
             max_retries=0,  # 重试在本模块内做，SDK 层不重复重试
+            **kwargs,
         )
         _CLIENT_CACHE[key] = client
     return client

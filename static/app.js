@@ -1032,6 +1032,7 @@
       var edge = group.edge, from = layout.positions[edge.source], to = layout.positions[edge.target];
       if (!from || !to) return;
       var mutual = edge.direction === "<->";
+      var backward = edge.direction === "<-";
       var forward = to.x > from.x || (to.x === from.x && to.y > from.y);
       var x1 = from.x + (forward ? GRAPH_NODE_W : 0), y1 = from.y + GRAPH_NODE_H / 2;
       var x2 = to.x + (forward ? 0 : GRAPH_NODE_W), y2 = to.y + GRAPH_NODE_H / 2;
@@ -1041,9 +1042,11 @@
         class: "ge-line" + (mutual ? " mutual" : ""),
         d: "M" + x1 + " " + y1 + " C " + (x1 + (forward ? bend : -bend)) + " " + y1 + ", "
            + (x2 + (forward ? -bend : bend)) + " " + y2 + ", " + x2 + " " + y2,
-        "marker-end": "url(#arrow-soft)", "data-pair": edge.source + ":" + edge.target,
+        "data-pair": edge.source + ":" + edge.target,
       });
-      if (mutual) path.setAttribute("marker-start", "url(#arrow-soft)");
+      // 方向语义：-> 源指向目标；<- 目标指向源；<-> 双向
+      if (!backward) path.setAttribute("marker-end", "url(#arrow-soft)");
+      if (mutual || backward) path.setAttribute("marker-start", "url(#arrow-soft)");
       path.appendChild(svgEl("title", {}, relationLabel(edge.relation) + " · " + Math.round((edge.strength || 0) * 100) + "%"));
       edgeLayer.appendChild(path);
       // 箭头上只写关系类型；证据强度是给人看细节用的，放进悬停标题
@@ -1059,7 +1062,7 @@
     nodes.forEach(function (node) {
       var pos = layout.positions[node.id];
       if (!pos) return;
-      var group = svgEl("g", { class: "gn" + (state.currentPaper && state.currentPaper.id === node.id ? " current" : ""),
+      var group = svgEl("g", { class: "gn" + (node.external ? " external" : "") + (state.currentPaper && state.currentPaper.id === node.id ? " current" : ""),
         tabindex: "0", role: "button", "data-node": String(node.id) });
       group.appendChild(svgEl("rect", { x: pos.x, y: pos.y, width: GRAPH_NODE_W, height: GRAPH_NODE_H, rx: 10 }));
       var title = shortText(node.label || "", 34);
@@ -1995,10 +1998,28 @@
       if (window.Desktop) window.Desktop.storageInfo();
       $("set-api-key").value = "";
       I18n.bind($("key-hint"), function () { return s.has_api_key ? (I18n.t("ui.a49a423c7014") + s.api_key_preview) : I18n.t("ui.080d8395d826"); });
+      // 划词翻译自定义端点（seltr.*；留空 = 跟随主设置）
+      $("seltr-model").value = s.seltr_model || "";
+      $("seltr-base-url").value = s.seltr_base_url || "";
+      $("seltr-api-key").value = "";
+      bindSeltrHints(s);
       I18n.write($("settings-test-result"), "");
       FullTranslate.loadSettings();
       $("settings-modal").classList.remove("hidden");
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
+  /** 划词翻译区块的两条提示：自定义 Key 状态 + 当前生效的端点组合。 */
+  function bindSeltrHints(s) {
+    I18n.bind($("seltr-key-hint"), function () {
+      return s.seltr_has_api_key
+        ? (I18n.t("ui.c818e3d8ae98") + s.seltr_api_key_preview)
+        : I18n.t("ui.4597519e0ad4");
+    });
+    I18n.bind($("seltr-effective"), function () {
+      var effUrl = s.seltr_base_url || s.base_url || "—";
+      var effModel = s.seltr_model || s.model || "—";
+      return I18n.t("ui.8fa5a7efaadd") + effModel + " @ " + effUrl;
+    });
   }
   function collectSettings() {
     var body = {
@@ -2014,6 +2035,11 @@
     };
     var key = $("set-api-key").value.trim();
     if (key) body.api_key = key;   // 留空则不修改
+    // 划词翻译自定义端点：空串 = 清除该自定义字段（回退跟随主设置）
+    body.seltr_model = $("seltr-model").value.trim();
+    body.seltr_base_url = $("seltr-base-url").value.trim();
+    var seltrKey = $("seltr-api-key").value.trim();
+    if (seltrKey) body.seltr_api_key = seltrKey;   // 留空则不修改
     return body;
   }
   function saveSettings(silent) {
@@ -2022,6 +2048,8 @@
       var s = results[0];
       I18n.bind($("key-hint"), function () { return s.has_api_key ? (I18n.t("ui.a49a423c7014") + s.api_key_preview) : I18n.t("ui.080d8395d826"); });
       $("set-api-key").value = "";
+      $("seltr-api-key").value = "";
+      bindSeltrHints(s);
       markSettingsAttention(!(s.base_url && s.model && s.has_api_key));
       applyLanguage(s.output_language || "zh");
       if (!silent) toast(function () { return I18n.t("ui.bd03c0aad701"); }, "ok");

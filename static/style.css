@@ -874,6 +874,8 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
 .graph-svg .gn rect { fill: var(--panel); stroke: var(--border-strong); stroke-width: 1.2; filter: drop-shadow(0 2px 6px rgba(22, 28, 43, .08)); }
 .graph-svg .gn:hover rect, .graph-svg .gn:focus-visible rect { stroke: var(--accent); stroke-width: 1.8; }
 .graph-svg .gn.current rect { stroke: var(--accent); stroke-width: 2; fill: var(--accent-soft); }
+.graph-svg .gn.external rect { stroke-dasharray: 5 3; fill: var(--panel-soft); }
+.graph-svg .gn.external .gn-t1, .graph-svg .gn.external .gn-t2 { fill: var(--muted); }
 .graph-svg .gn { cursor: pointer; outline: none; }
 .graph-svg .gn-t1, .graph-svg .gn-t2 { font: 600 12.5px/1.35 var(--font, system-ui, sans-serif); fill: var(--text); }
 .graph-svg .gn-t2 { font-weight: 500; }

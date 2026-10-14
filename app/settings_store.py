@@ -124,3 +124,52 @@ def mask_api_key(key: str) -> str:
     if len(key) <= 8:
         return "****"
     return key[:4] + "****" + key[-4:]
+
+
+# ---------------------------------------------------------------- 划词翻译自定义端点
+# 翻译调用频率高，不适合一直走昂贵的主模型：seltr.* 任一字段非空即覆盖主设置的
+# 对应字段，留空的字段继续跟随主设置（per-field fallback）。
+SELTR_KEYS = ("seltr.base_url", "seltr.model", "seltr.api_key")
+
+
+def get_selection_translation_raw(db: Session) -> Dict[str, str]:
+    raw = _read_all(db)
+    return {key: (raw.get(key) or "").strip() for key in SELTR_KEYS}
+
+
+def update_selection_translation(db: Session, patch: Dict[str, Any]) -> None:
+    """写入划词翻译端点设置；空串 = 清除该自定义字段（回退跟随主设置）。"""
+    for key in SELTR_KEYS:
+        if key not in patch or patch[key] is None:
+            continue
+        text = str(patch[key]).strip()
+        row = db.get(Setting, key)
+        if row is None:
+            db.add(Setting(key=key, value=text))
+        else:
+            row.value = text
+    db.commit()
+
+
+def get_selection_translation_settings(db: Session) -> LLMSettings:
+    """划词翻译实际使用的 LLM 设置。
+
+    组合规则（防止"主端点 + 残留自定义 Key"这种错配）：
+      - base_url 与 model 都未自定义 → 完全跟随主设置（忽略残留的 seltr.api_key）；
+      - 只自定义 model（同端点换便宜模型）→ 用主设置的 Key；
+      - 自定义了 base_url（换端点）→ 优先用自定义 Key，未设则先试主 Key。
+    """
+    from dataclasses import replace
+    main = get_llm_settings(db)
+    raw = get_selection_translation_raw(db)
+    custom_url = raw["seltr.base_url"]
+    custom_model = raw["seltr.model"]
+    if not custom_url and not custom_model:
+        return main
+    api_key = main.api_key
+    if custom_url and raw["seltr.api_key"]:
+        api_key = raw["seltr.api_key"]
+    return replace(main,
+                   base_url=custom_url or main.base_url,
+                   model=custom_model or main.model,
+                   api_key=api_key)

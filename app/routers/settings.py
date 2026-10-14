@@ -26,7 +26,8 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 _CLEAR_WORDS = ("none", "null", "default")
 
 
-def _to_out(settings: harness_llm.LLMSettings) -> schemas.LLMSettingsOut:
+def _to_out(settings: harness_llm.LLMSettings, db: Session = None) -> schemas.LLMSettingsOut:
+    seltr = settings_store.get_selection_translation_raw(db) if db is not None else {}
     return schemas.LLMSettingsOut(
         base_url=settings.base_url,
         model=settings.model,
@@ -39,6 +40,10 @@ def _to_out(settings: harness_llm.LLMSettings) -> schemas.LLMSettingsOut:
         api_key_preview=settings_store.mask_api_key(settings.api_key),
         request_timeout=settings.request_timeout,
         max_retries=settings.max_retries,
+        seltr_base_url=(seltr or {}).get("seltr.base_url", ""),
+        seltr_model=(seltr or {}).get("seltr.model", ""),
+        seltr_has_api_key=bool((seltr or {}).get("seltr.api_key")),
+        seltr_api_key_preview=settings_store.mask_api_key((seltr or {}).get("seltr.api_key", "")),
     )
 
 
@@ -50,8 +55,10 @@ def _normalize_patch(body: schemas.LLMSettingsUpdate) -> Dict[str, Any]:
             continue
         if isinstance(value, str):
             text = value.strip()
-            if key == "api_key":
-                if text:
+            if key in ("api_key", "seltr_api_key"):
+                if text and text.lower() in _CLEAR_WORDS and key == "seltr_api_key":
+                    patch[key] = ""          # 划词翻译 Key 允许用 default/none 显式清除
+                elif text:
                     patch[key] = text
                 continue
             if not text or text.lower() in _CLEAR_WORDS:
@@ -59,11 +66,12 @@ def _normalize_patch(body: schemas.LLMSettingsUpdate) -> Dict[str, Any]:
                 continue
         patch[key] = value
     from urllib.parse import urlsplit
-    url = patch.get("base_url")
-    if url:
-        parts = urlsplit(url)
-        if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
-            raise HTTPException(422, detail={"code": "settings.invalid_url", "params": {}})
+    for url_key in ("base_url", "seltr_base_url"):
+        url = patch.get(url_key)
+        if url:
+            parts = urlsplit(url)
+            if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
+                raise HTTPException(422, detail={"code": "settings.invalid_url", "params": {}})
     for key, lower, upper in (("temperature", 0, 2), ("top_p", 0, 1), ("max_tokens", 1, 2000000)):
         value = patch.get(key)
         if value not in (None, "") and not lower <= value <= upper:
@@ -73,14 +81,23 @@ def _normalize_patch(body: schemas.LLMSettingsUpdate) -> Dict[str, Any]:
 
 @router.get("", response_model=schemas.LLMSettingsOut)
 def get_settings(db: Session = Depends(database.get_db)):
-    return _to_out(settings_store.get_llm_settings(db))
+    return _to_out(settings_store.get_llm_settings(db), db)
 
 
 @router.put("", response_model=schemas.LLMSettingsOut)
 def update_settings(body: schemas.LLMSettingsUpdate,
                     db: Session = Depends(database.get_db)):
-    settings_store.update_llm_settings(db, _normalize_patch(body))
-    return _to_out(settings_store.get_llm_settings(db))
+    patch = _normalize_patch(body)
+    seltr_patch = {}
+    for field, key in (("seltr_base_url", "seltr.base_url"),
+                       ("seltr_model", "seltr.model"),
+                       ("seltr_api_key", "seltr.api_key")):
+        if field in patch:
+            seltr_patch[key] = patch.pop(field)
+    settings_store.update_llm_settings(db, patch)
+    if seltr_patch:
+        settings_store.update_selection_translation(db, seltr_patch)
+    return _to_out(settings_store.get_llm_settings(db), db)
 
 
 @router.post("/test", response_model=schemas.TestResult)

@@ -249,6 +249,14 @@
 <label><span data-i18n="ui.9f28a8874c78">重试次数</span><input id="set-retries" max="10" min="0" type="number"/></label>
 </div>
 <p class="hint" data-i18n="ui.18da2d39aabe">采样参数留空时使用模型服务默认值。</p></details>
+<details id="seltr-section"><summary data-i18n="ui.6cf2ac6561ef">划词翻译（选中文字）</summary>
+<p class="hint" data-i18n="ui.af663d503a06">划词翻译调用频繁，建议单独配一个便宜的模型；字段留空即跟随上方主设置。</p>
+<label><span data-i18n="ui.b2894e9efd28">翻译模型</span><input autocomplete="off" data-i18n-placeholder="ui.ef92f7e1fe4a" id="seltr-model" placeholder="留空：跟随主设置" type="text"/></label>
+<label><span data-i18n="ui.173ea9bc405f">Base URL</span><input autocomplete="off" data-i18n-placeholder="ui.4eeb4bce0cf9" id="seltr-base-url" placeholder="留空：跟随主设置" type="text"/></label>
+<label><span data-i18n="ui.53157b66d477">翻译 API Key</span><input autocomplete="off" data-i18n-placeholder="ui.8a14d9df4610" id="seltr-api-key" placeholder="留空：不修改；未设置则跟随主设置" type="password"/></label>
+<div class="hint" id="seltr-key-hint"></div>
+<div class="hint" id="seltr-effective"></div>
+</details>
 <details id="pdftr-section"><summary data-i18n="ui.5b1989d07180">全文翻译（PDF）</summary>
 <p class="hint" data-i18n="ui.f35dbe62c5c3">引擎为 pdf2zh_next，首次翻译时按需安装到独立目录，不影响主程序。</p>
 <label><span data-i18n="ui.cba889583751">翻译服务</span><select id="pdftr-service"></select></label>

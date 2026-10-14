@@ -207,6 +207,18 @@ def _escape(text: str) -> str:
     return re.sub(r"([\\`*_{}\[\]<>])", r"\\\1", str(text)).replace("\n", " ")
 
 
+def _strip_duplicate_h1(body: str, title: str) -> str:
+    """模型常在正文开头重复报告标题（intro 已带 H1），相同或互为子串时去掉。"""
+    if not body.startswith("# "):
+        return body
+    first, _, rest = body.partition("\n")
+    norm = lambda s: re.sub(r"\s+", "", s).lstrip("#").strip().lower()
+    head, want = norm(first), norm(title)
+    if head and want and (head in want or want in head):
+        return rest.lstrip("\n")
+    return body
+
+
 def run_review(db: Session, row: FolderReview, settings: Any, *, should_stop: Any = None) -> FolderReview:
     """复用已成功批次；任何漏项、失败或取消都不能标记为完整成功。"""
     settings = replace(settings, output_language=row.output_language)
@@ -311,6 +323,7 @@ def run_review(db: Session, row: FolderReview, settings: Any, *, should_stop: An
         coverage = choose(cfg, "材料覆盖", "Material coverage")
         bibliography = choose(cfg, "完整参考文献", "Complete bibliography")
         intro = "# {}\n\n> {}: {}/{} · {}\n\n".format(_escape(row.title), coverage, len(snapshot), len(snapshot), _escape(row.folder_path))
+        body = _strip_duplicate_h1(text.strip(), row.title)
         lines = []
         labels = {"notes": choose(cfg, "已有阅读笔记", "Existing reading notes"),
                   "full_text": choose(cfg, "可用全文", "Available full text"),
@@ -319,7 +332,7 @@ def run_review(db: Session, row: FolderReview, settings: Any, *, should_stop: An
             source = labels[p["coverage"]]
             lines.append("- [{}]({}) — {} · {} · {}".format(_escape(p["title"]), "/?paper={}".format(p["paper_id"]),
                          p["year"], _escape(p["arxiv_id"]), source))
-        row.content_md = intro + text.strip() + "\n\n## " + bibliography + "\n\n" + "\n".join(lines)
+        row.content_md = intro + body + "\n\n## " + bibliography + "\n\n" + "\n".join(lines)
         row.status = "done"
     except cancel.Cancelled:
         row.status, row.error = "cancelled", choose(cfg, "已取消；已完成批次可复用", "Cancelled; completed batches can be resumed")
