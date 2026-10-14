@@ -59,6 +59,11 @@
 html, body {
   margin: 0;
   height: 100%;
+  /* 应用外壳永不整页滚动：内部各面板自己滚动。
+     否则任何溜进 body 的游离元素（如 pdf.js 的测量画布）都会让整页
+     "可以一直往下滑"，把顶栏推出视口。 */
+  overflow: hidden;
+  overscroll-behavior: none;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Hiragino Sans GB", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
   color: var(--text);
@@ -414,6 +419,10 @@ button.mini.primary:hover { color: #fff; filter: brightness(1.05); }
 .pv-mark { position: absolute; border: 1.5px solid #ffd65a; background: rgba(255, 214, 90, .3); border-radius: 3px; pointer-events: none; }
 .pv-error { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: var(--muted); font-size: 12.5px; text-align: center; }
 .pv-status { padding: 26px; text-align: center; color: #c3c9d6; font-size: 12.5px; }
+/* PDF.js 文字层量字的隐藏画布会直接 append 到 <body>；官方 pdf_viewer.css 里有
+   .hiddenCanvasElement{display:none}，我们没打包那份 CSS，不补这条的话它作为
+   行内元素给 body 撑出一行高度，整页就能往下多滚一截。display:none 不影响量字。 */
+.hiddenCanvasElement { display: none; }
 
 /* 译文侧栏：浅色面板，与整体界面同一套底色，不再用深色浮层 */
 #translate-panel {

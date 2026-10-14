@@ -17,7 +17,9 @@
   function copy(text) {
     if (available()) return call("copy", { text: text });
     if (navigator.clipboard) return navigator.clipboard.writeText(text);
-    var node = document.createElement("textarea"); node.value = text; document.body.appendChild(node);
+    var node = document.createElement("textarea"); node.value = text;
+    node.style.cssText = "position:fixed;top:-1000px;opacity:0";
+    document.body.appendChild(node);
     node.select(); var ok = document.execCommand("copy"); node.remove();
     return ok ? Promise.resolve() : Promise.reject(new Error());
   }
