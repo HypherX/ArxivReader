@@ -65,13 +65,12 @@ def resources(output):
     (output / "build-info.json").write_text(json.dumps(info, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def main():
-    if sys.version_info[:2] != (3, 12) or sys.platform not in ("darwin", "win32"):
-        raise SystemExit("请使用目标 macOS / Windows 平台的独立 Python 3.12 环境构建。")
+def main(out=None):
     generated = ROOT / ".build-generated"
     generated.mkdir(exist_ok=True)
     resources(generated)
-    dist = ROOT / "dist"
+    dist = Path(out).resolve() if out else ROOT / "dist"
+    dist.mkdir(parents=True, exist_ok=True)
     subprocess.run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", str(dist),
                     "--workpath", str(ROOT / ".build-work"), str(ROOT / "ArxivReader.spec")], cwd=ROOT, check=True)
     architecture = "arm64" if platform.machine().lower() in ("arm64", "aarch64") else "x64"
@@ -99,4 +98,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    argv = sys.argv[1:]
+    out_dir = None
+    if "--out" in argv:
+        index = argv.index("--out")
+        if index + 1 >= len(argv):
+            raise SystemExit("--out 需要一个目录参数，例如：--out /path/to/releases")
+        out_dir = argv[index + 1]
+    elif "-h" in argv or "--help" in argv:
+        raise SystemExit("用法：python tools/build_desktop.py [--out 输出目录]\n"
+                         "  在目标平台（macOS / Windows）的 Python 3.12 环境运行；\n"
+                         "  不带 --out 时输出到项目下的 dist/。")
+    main(out_dir)
