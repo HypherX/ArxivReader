@@ -4,10 +4,6 @@
 
 **在你自己电脑上跑的论文阅读器** —— 收 arXiv / 本地 PDF，读原文、划词翻译、问答精读，再把一堆论文长成方向树与关系图谱。
 
-![Release](https://img.shields.io/badge/下载-Releases-4a57e6?style=flat-square&logo=github&logoColor=white)
-![Platform](https://img.shields.io/badge/macOS%20%C2%B7%20Windows-支持-0f8f4d?style=flat-square)
-![Python](https://img.shields.io/badge/Python-3.12-3776ab?style=flat-square)
-![Local](https://img.shields.io/badge/数据-全在本机-78829a?style=flat-square)
 
 [中文](README.md) · [English](README.en.md)
 
