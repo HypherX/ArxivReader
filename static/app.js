@@ -1365,10 +1365,16 @@
       });
   }
 
+  // 前置依赖：自动分类需要先有摘要，论文关系需要先有精读。
+  // 首次点击自动补齐前置步（已有最新产物时后端会跳过，不会重复调用）；
+  // 强制重跑（force）只重跑本步，避免连带重新生成摘要/精读。
+  var AI_STEP_PREREQS = { tree: ["summary"], graph: ["deep"] };
+
   function runAiStep(step, force) {
     var paper = state.currentPaper;
     if (!paper) { toast(function () { return I18n.t("ui.7912dc9e9b8b"); }, "err"); return; }
-    runPaperPipeline(paper, !!force, [step]);
+    var steps = force ? [step] : (AI_STEP_PREREQS[step] || []).concat([step]);
+    runPaperPipeline(paper, !!force, steps);
   }
 
   /** 每个动作按钮上直接显示这一步的现有结果，让"做过没有"一眼可见。 */
@@ -1399,8 +1405,9 @@
     var subset = (onlySteps && onlySteps.length)
       ? allSteps.filter(function (s) { return onlySteps.indexOf(s.name) >= 0; })
       : allSteps;
-    var subtitle = (onlySteps && onlySteps.length && ARTIFACT_META[STEP_TO_ARTIFACT[onlySteps[0]]])
-      ? I18n.t("ui.5714758766c8") + ARTIFACT_META[STEP_TO_ARTIFACT[onlySteps[0]]].title : "";
+    var lastStep = onlySteps && onlySteps.length ? onlySteps[onlySteps.length - 1] : null;
+    var subtitle = (lastStep && ARTIFACT_META[STEP_TO_ARTIFACT[lastStep]])
+      ? I18n.t("ui.5714758766c8") + ARTIFACT_META[STEP_TO_ARTIFACT[lastStep]].title : "";
     pipelineRunning = true;
     pipelinePaperId = paper.id;
     renderPipelinePanel(paper, "running", subset, subtitle);
@@ -1484,7 +1491,9 @@
   function showReader(paper) {
     $("reader-shell").classList.remove("hidden");
     $("viewer-empty").classList.add("hidden");
-    if (!PdfView.isVisible()) { PdfView.open(paper); Translate.clear(); }
+    // 打开另一篇论文时要重开 PDF（isVisible 只表示"开着"，不代表"是这篇"）
+    var cur = PdfView.current ? PdfView.current() : { paperId: null };
+    if (!PdfView.isVisible() || cur.paperId !== paper.id) { PdfView.open(paper); Translate.clear(); }
   }
 
   function hideReader() {
@@ -1498,6 +1507,7 @@
     PdfView.init();
     Translate.init(function () { return state.currentPaper && state.currentPaper.id; });
     Translate.watch($("pdf-scroll"));
+    FullTranslate.init(function () { return state.currentPaper; });
   }
 
 
@@ -1559,6 +1569,7 @@
     hideNodeGraph();
     state.currentPaper = p; renderPapers();
     showReader(p);
+    FullTranslate.onPaperChanged(p);
     $("viewer-toolbar").classList.remove("hidden");
     I18n.write($("viewer-title"), p.title || p.arxiv_id);
     I18n.write($("chat-title"), p.title || p.arxiv_id);
@@ -1667,6 +1678,7 @@
     state.currentPaper = null; state.sessions = []; state.currentSessionId = null;
     state.artifacts = {}; state.knowledge = { memberships: [], edges: [] };
     hideReader();
+    FullTranslate.onPaperChanged(null);
     $("viewer-empty").classList.remove("hidden");
     $("viewer-toolbar").classList.add("hidden");
     I18n.bind($("chat-title"), function () { return I18n.t("ui.e63a45a5fc1e"); });
@@ -1984,6 +1996,7 @@
       $("set-api-key").value = "";
       I18n.bind($("key-hint"), function () { return s.has_api_key ? (I18n.t("ui.a49a423c7014") + s.api_key_preview) : I18n.t("ui.080d8395d826"); });
       I18n.write($("settings-test-result"), "");
+      FullTranslate.loadSettings();
       $("settings-modal").classList.remove("hidden");
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
@@ -2004,7 +2017,9 @@
     return body;
   }
   function saveSettings(silent) {
-    return api.put("/api/settings", collectSettings()).then(function (s) {
+    // 主 LLM 设置与「全文翻译（PDF）」设置一起保存，任一失败都要让使用者看到
+    return Promise.all([api.put("/api/settings", collectSettings()), FullTranslate.saveSettings()]).then(function (results) {
+      var s = results[0];
       I18n.bind($("key-hint"), function () { return s.has_api_key ? (I18n.t("ui.a49a423c7014") + s.api_key_preview) : I18n.t("ui.080d8395d826"); });
       $("set-api-key").value = "";
       markSettingsAttention(!(s.base_url && s.model && s.has_api_key));

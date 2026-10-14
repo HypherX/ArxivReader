@@ -62,6 +62,7 @@
     state.token += 1;
     queue = []; rendering = 0;
     state.paperId = null;
+    state.url = null;
     state.matches = []; state.matchIndex = -1; state.query = "";
     state.pages.forEach(function (p) { if (p.task) p.task.cancel(); });
     state.pages = [];
@@ -71,18 +72,20 @@
     if (box) { box.innerHTML = ""; box.scrollTop = 0; box.scrollLeft = 0; }
   }
 
-  function open(paper) {
+  function open(paper, opts) {
     var box = scrollBox();
     if (!box) return Promise.resolve();
     close();
     var token = state.token;
     state.paperId = paper.id;
+    // 默认打开原始 PDF；传入 opts.url 可打开全文翻译产物（对照版 / 译文版）
+    state.url = (opts && opts.url) || ("/api/papers/" + paper.id + "/pdf");
     state.scale = 1; state.rotation = 0; state.fitted = true;
     box.innerHTML = "";
     box.appendChild(node("div", { class: "pv-status", text: global.I18n.t("ui.9aed1d2f4cea") }));
     return loadPdfJs().then(function (lib) {
       return lib.getDocument({
-        url: "/api/papers/" + paper.id + "/pdf",
+        url: state.url,
         cMapUrl: BASE + "cmaps/", cMapPacked: true,
         standardFontDataUrl: BASE + "standard_fonts/",
         isEvalSupported: false,      // 桌面壳里禁了远程脚本，字体回退走 canvas 路径
@@ -520,5 +523,6 @@
   }
 
   global.PdfView = { open: open, close: close, gotoPage: gotoPage, init: bind,
-                     isVisible: function () { return !!state.paperId; } };
+                     isVisible: function () { return !!state.paperId; },
+                     current: function () { return { paperId: state.paperId, url: state.url }; } };
 })(window);

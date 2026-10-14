@@ -102,6 +102,9 @@ class Paper(Base):
     pipeline_runs: Mapped[List["PipelineRun"]] = relationship(
         "PipelineRun", back_populates="paper", cascade="all, delete-orphan"
     )
+    pdf_translations: Mapped[List["PdfTranslationTask"]] = relationship(
+        "PdfTranslationTask", back_populates="paper", cascade="all, delete-orphan"
+    )
 
     @property
     def authors(self) -> List[str]:
@@ -245,6 +248,51 @@ class ContentTranslation(Base):
     source_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     content_md: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class PdfTranslationTask(Base):
+    """一次 PDF 全文翻译任务（pdf2zh_next 引擎，产出 mono 纯译文 / dual 对照 PDF）。
+
+    一本论文可以同时有多个历史任务（不同语言 / 排版）；同一论文同一时刻只允许一个在跑。
+    status ∈ {queued, running, done, failed, cancelled, interrupted}。
+    """
+
+    __tablename__ = "pdf_translation_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    paper_id: Mapped[int] = mapped_column(ForeignKey("papers.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    message: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 本次任务的完整参数快照（服务 / 语言 / 输出方式 / 排版 / 页范围等）
+    options_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    mono_path: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    dual_path: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    log_tail_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow,
+                                                         onupdate=_utcnow)
+    finished_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
+
+    paper: Mapped["Paper"] = relationship("Paper")
+
+    @property
+    def options(self) -> dict:
+        try:
+            data = json.loads(self.options_json or "{}")
+            return data if isinstance(data, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    @property
+    def log_tail(self) -> List[str]:
+        try:
+            data = json.loads(self.log_tail_json or "[]")
+            return [str(x) for x in data] if isinstance(data, list) else []
+        except (ValueError, TypeError):
+            return []
 
 
 class FolderReview(Base):
