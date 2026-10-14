@@ -1053,3 +1053,49 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
+
+/* ---------------- 全文翻译（pdf2zh） ---------------- */
+/* 阅读器顶栏的 PDF 版本切换（原文 / 对照版 / 译文版） */
+.rb-source {
+  min-width: 0; max-width: 128px; background: rgba(0, 0, 0, .22);
+  border: 1px solid rgba(255, 255, 255, .18); border-radius: 8px;
+  color: #eef1f8; font-size: 12px; padding: 4px 6px; outline: none;
+}
+.rb-source:focus { border-color: var(--accent); background: rgba(0, 0, 0, .32); }
+.rb-source option { color: var(--text); background: #fff; }
+
+/* 翻译弹窗：引擎状态行 / 安装日志 / 产物列表 */
+.ft-engine { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.ft-engine .hint { margin: 0; }
+#ft-install-box { margin: 6px 0 10px; display: flex; flex-direction: column; gap: 8px; }
+#ft-form .row { margin-top: 4px; }
+#ft-form label > span:first-child { display: block; margin-bottom: 3px; font-size: .82em; color: var(--text-soft); font-weight: 600; }
+#ft-langs { display: inline-block; padding-top: 6px; }
+#ft-service-line { margin-bottom: 2px; }
+#ft-progress-box { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+#ft-progress-box details summary { cursor: pointer; font-size: .82em; color: var(--text-soft); }
+#ft-result { margin-top: 10px; }
+.ft-files { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.ft-file-row { display: flex; align-items: center; gap: 8px; }
+.ft-file-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .82em; color: var(--text-soft);
+}
+.ft-file-row .mini { flex: none; }
+.ft-file-row a.mini { text-decoration: none; }
+#ft-error.err { color: var(--danger); }
+#ft-modal .modal-card { max-height: 86vh; overflow: auto; }
+
+/* 引擎安装进度：安装没有总量，用流动条表示"进行中" */
+.progress-bar.indeterminate { width: 38% !important; animation: ft-slide 1.4s var(--ease) infinite; }
+@keyframes ft-slide { 0% { margin-left: -38%; } 100% { margin-left: 100%; } }
+
+/* 设置弹窗里的全文翻译区 */
+#pdftr-section { margin-top: 10px; }
+#pdftr-section > .hint { margin: 6px 0; }
+#pdftr-section label { margin-top: 8px; }
+#pdftr-section .row label { margin-top: 8px; }
+.pdftr-flags { flex-wrap: wrap; }
+.pdftr-flags label { display: flex; align-items: center; gap: 6px; flex: 1 1 45%; font-size: .88em; }
+.pdftr-flags input[type="checkbox"] { margin: 0; }
+#pdftr-key-hint { margin-top: 2px; }

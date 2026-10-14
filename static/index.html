@@ -71,6 +71,7 @@
 <div class="viewer-toolbar hidden" id="viewer-toolbar">
 <span class="v-title" id="viewer-title"></span>
 <span class="v-ops">
+<button class="mini" data-i18n="ui.010b35dc54d3" data-i18n-title="ui.42dff8e480a6" id="full-translate" title="用 pdf2zh 引擎翻译整篇 PDF：中英对照版或纯译文版">🌐 全文翻译</button>
 <button class="mini" data-i18n="ui.8c1d7b64e888" data-i18n-title="ui.d3ad4a5538c4" id="open-graph" title="在中间栏显示这篇论文的关系图谱">🕸 关系图谱</button>
 <button class="mini" data-i18n="ui.1b479fbe937b" data-i18n-title="ui.bea87d37cedf" id="run-related" title="智能关联检索：读当前论文的 Related Work / 参考文献，自动到 arXiv 检索并筛选强相关论文（可一键加入详细阅读）">🔗 智能关联检索</button>
 <button class="mini" data-i18n="ui.ee4421ed1423" data-i18n-title="ui.4d387b9b93c4" id="move-paper" title="移动到其它文件夹">📁 移动</button>
@@ -107,6 +108,7 @@
 </span>
 <span class="spacer"></span>
 <span class="rb-group">
+<select aria-label="PDF 版本" class="rb-source hidden" data-i18n-aria-label="ui.67a27e2ee51e" data-i18n-title="ui.67a27e2ee51e" id="pdf-source" title="切换 PDF 版本"></select>
 <button class="mini" data-i18n="ui.80461c2decc5" data-i18n-title="ui.dcf2f068701e" id="tp-toggle" title="显示或隐藏译文栏">译文</button>
 </span>
 </div>
@@ -247,6 +249,39 @@
 <label><span data-i18n="ui.9f28a8874c78">重试次数</span><input id="set-retries" max="10" min="0" type="number"/></label>
 </div>
 <p class="hint" data-i18n="ui.18da2d39aabe">采样参数留空时使用模型服务默认值。</p></details>
+<details id="pdftr-section"><summary data-i18n="ui.5b1989d07180">全文翻译（PDF）</summary>
+<p class="hint" data-i18n="ui.f35dbe62c5c3">引擎为 pdf2zh_next，首次翻译时按需安装到独立目录，不影响主程序。</p>
+<label><span data-i18n="ui.cba889583751">翻译服务</span><select id="pdftr-service"></select></label>
+<label><span data-i18n="ui.b2894e9efd28">翻译模型</span><input autocomplete="off" data-i18n-placeholder="ui.ef92f7e1fe4a" id="pdftr-model" placeholder="留空：跟随主模型或服务默认" type="text"/></label>
+<label id="pdftr-baseurl-row"><span data-i18n="ui.173ea9bc405f">Base URL</span><input autocomplete="off" data-i18n-placeholder="ui.4eeb4bce0cf9" id="pdftr-base-url" placeholder="留空：跟随主设置或服务默认" type="text"/></label>
+<label id="pdftr-apikey-row"><span data-i18n="ui.53157b66d477">翻译 API Key</span><input autocomplete="off" data-i18n-placeholder="ui.8a14d9df4610" id="pdftr-api-key" placeholder="留空：不修改；未设置则跟随主设置" type="password"/></label>
+<div class="hint" id="pdftr-key-hint"></div>
+<div class="row">
+<label><span data-i18n="ui.edce6adcf376">源语言</span><select id="pdftr-lang-in"></select></label>
+<label><span data-i18n="ui.31eb48734e0c">目标语言</span><select id="pdftr-lang-out"></select></label>
+</div>
+<div class="row">
+<label><span data-i18n="ui.ec301db8b0d2">QPS（并发请求数）</span><input id="pdftr-qps" max="100" min="1" step="1" type="number"/></label>
+<label><span data-i18n="ui.9eaee313dacf">默认输出</span><select id="pdftr-output">
+<option data-i18n="ui.91c3f53c0ea8" value="dual">中英对照（dual）</option>
+<option data-i18n="ui.5b5f81ba1770" value="mono">仅译文（mono）</option>
+<option data-i18n="ui.972f979236a5" value="both">两份都要</option>
+</select></label>
+<label id="pdftr-dual-mode-wrap"><span data-i18n="ui.4f3cdb257f9e">对照排版</span><select id="pdftr-dual-mode">
+<option data-i18n="ui.d831531ddd81" value="LR">同页左右对照</option>
+<option data-i18n="ui.20fd331e34cc" value="TB">原文/译文交替页</option>
+</select></label>
+</div>
+<details><summary data-i18n="ui.429643af2b94">高级选项</summary>
+<div class="row pdftr-flags">
+<label><input id="pdftr-dual-first" type="checkbox"/><span data-i18n="ui.e4bc6a75f9ec">对照版译文在前</span></label>
+<label><input id="pdftr-table" type="checkbox"/><span data-i18n="ui.a0eadba4e6f2">翻译表格文字</span></label>
+<label><input id="pdftr-ocr" type="checkbox"/><span data-i18n="ui.901e95e1925b">OCR 兼容（扫描版 PDF）</span></label>
+<label><input id="pdftr-compat" type="checkbox"/><span data-i18n="ui.78696b227b37">增强兼容模式</span></label>
+<label><input id="pdftr-mirror" type="checkbox"/><span data-i18n="ui.54da9e441de4">安装引擎时使用国内镜像</span></label>
+</div>
+</details>
+</details>
 <p class="hint" data-i18n="ui.5c3eddea3976">测试连接会发送一次模型请求，可能计费；不会自动保存设置。</p>
 <div class="hidden" id="desktop-storage"><p class="hint" id="storage-path"></p><button class="ghost" data-i18n="ui.f2ec38914b2d" id="storage-open">打开资料目录</button><button class="ghost" data-i18n="ui.ae4217e96d7d" id="storage-select">选择已有资料库</button><p class="hint" data-i18n="ui.ab12b2196651">切换资料库将在下次启动生效，不移动或删除原有资料。</p></div>
 <div class="hint" id="settings-test-result"></div>
@@ -294,6 +329,64 @@
 <span class="hint foot-hint" data-i18n="ui.f1bb9064ed8c">入库后复用同语言、同版本总结，继续分类、精读和关系；综述由文件夹菜单手动生成。</span>
 <span class="spacer"></span>
 <button class="ghost" data-close="related-modal" data-i18n="ui.3fd47edce45b">关闭</button>
+</div>
+</div>
+</div>
+<!-- 全文翻译（pdf2zh）：引擎安装 + 输出方式 + 进度 + 产物查看 -->
+<div class="modal hidden" id="ft-modal">
+<div class="modal-card">
+<div class="modal-head">
+<span data-i18n="ui.8788fafe377b" id="ft-heading">全文翻译（pdf2zh）</span>
+<span class="head-hint" id="ft-head-hint"></span>
+<button class="mini" data-close="ft-modal">✕</button>
+</div>
+<div class="modal-body">
+<div class="ft-engine" id="ft-engine-row">
+<span class="hint"><span data-i18n="ui.2b3170eb6f9a">翻译引擎</span>：<span id="ft-engine-status">…</span></span>
+<button class="mini hidden" data-i18n="ui.be960da20af6" id="ft-install">安装引擎</button>
+</div>
+<div class="hint hidden" data-i18n="ui.c55b39b757cb" id="ft-install-hint">首次使用需安装 pdf2zh_next 引擎（约数百 MB，一次性；装在独立目录，不影响主程序）。翻译服务在「设置 → 全文翻译」里配置。</div>
+<div class="hidden" id="ft-install-box">
+<div class="progress"><div class="progress-bar indeterminate" id="ft-install-bar"></div></div>
+<div class="search-logs" id="ft-install-log"></div>
+</div>
+<div id="ft-form">
+<div class="hint" id="ft-service-line"></div>
+<div class="row">
+<label><span data-i18n="ui.a215a332fd00">输出方式</span><select id="ft-output">
+<option data-i18n="ui.91c3f53c0ea8" value="dual">中英对照（dual）</option>
+<option data-i18n="ui.5b5f81ba1770" value="mono">仅译文（mono）</option>
+<option data-i18n="ui.972f979236a5" value="both">两份都要</option>
+</select></label>
+<label id="ft-dual-mode-wrap"><span data-i18n="ui.2d8736abe908">对照排版</span><select id="ft-dual-mode">
+<option data-i18n="ui.d831531ddd81" value="LR">同页左右对照</option>
+<option data-i18n="ui.20fd331e34cc" value="TB">原文/译文交替页</option>
+</select></label>
+</div>
+<div class="row">
+<label><span data-i18n="ui.d00e76639413">页范围（可选，如 1-5）</span><input autocomplete="off" id="ft-pages" placeholder="1-5" type="text"/></label>
+<label><span data-i18n="ui.a84280a89fc8">语言</span><span class="hint" id="ft-langs"></span></label>
+</div>
+<p class="hint" data-i18n="ui.dc49390b911e">全文翻译会逐页处理整篇 PDF，耗时几分钟到十几分钟；翻译在后台进行，可关闭此窗口。</p>
+</div>
+<div class="hidden" id="ft-progress-box">
+<div class="progress"><div class="progress-bar" id="ft-bar"></div></div>
+<div class="hint" id="ft-progress-text"></div>
+<details><summary data-i18n="ui.799512d52b19">运行日志</summary><div class="search-logs" id="ft-log"></div></details>
+</div>
+<div class="hidden" id="ft-result">
+<div class="hint" data-i18n="ui.e99a938191b8" id="ft-result-title">最近一次翻译</div>
+<div class="ft-files" id="ft-files"></div>
+</div>
+<div class="hint" id="ft-error"></div>
+</div>
+<div class="modal-foot">
+<button class="primary" data-i18n="ui.aa9795976762" id="ft-run">开始翻译</button>
+<button class="ghost hidden" data-i18n="ui.74b23a9e88ca" id="ft-cancel">取消翻译</button>
+<button class="ghost hidden" data-i18n="ui.dd542ebe593b" id="ft-rerun">重新翻译</button>
+<span class="spacer"></span>
+<button class="ghost" data-i18n="ui.7c5f7b2cd1b8" id="ft-open-settings">去设置</button>
+<button class="ghost" data-close="ft-modal" data-i18n="ui.3fd47edce45b">关闭</button>
 </div>
 </div>
 </div>
@@ -345,6 +438,7 @@
 <script src="/renderer.js"></script>
 <script src="/pdfview.js"></script>
 <script src="/translate.js"></script>
+<script src="/fulltranslate.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

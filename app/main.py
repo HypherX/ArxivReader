@@ -19,11 +19,35 @@ from fastapi.staticfiles import StaticFiles
 
 from harness import config
 from . import database
-from .routers import (cancel, chat, folders, knowledge, papers, related, reviews,
-                      settings as settings_router, skills, translations)
+from .routers import (cancel, chat, folders, knowledge, papers, pdftranslate, related,
+                      reviews, settings as settings_router, skills, translations)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("ArxivReader")
+
+
+def _sanitize_no_proxy_env() -> None:
+    """剔除进程环境 no_proxy 里的 IPv6 条目（::1 / [::1]）。
+
+    httpx/openai 等客户端把 no_proxy 条目按 host:port 解析，带冒号的 IPv6
+    字面量会直接抛 "Invalid port: ':1]'"，让所有出站 LLM 请求在本地代理
+    环境下全军覆没。localhost / 127.0.0.1 保留；本应用用不到 IPv6 环回。
+    翻译子进程另有一层同样的防护（pdftranslate.engine）。
+    """
+    for key in ("no_proxy", "NO_PROXY"):
+        value = os.environ.get(key)
+        if not value:
+            continue
+        kept = [item.strip() for item in value.split(",") if item.strip() and ":" not in item.strip()]
+        if not kept:
+            os.environ.pop(key, None)
+            logger.info("%s 仅含 IPv6 条目，已整体移除（HTTP 客户端兼容性）", key)
+        elif len(kept) != len([p for p in value.split(",") if p.strip()]):
+            os.environ[key] = ",".join(kept)
+            logger.info("已剔除 %s 中的 IPv6 条目（HTTP 客户端兼容性）", key)
+
+
+_sanitize_no_proxy_env()
 
 STATIC_DIR = os.path.join(config.ROOT_DIR, "static")
 
@@ -47,10 +71,12 @@ async def lifespan(app: FastAPI):
     from knowledge.review import recover_interrupted
     from knowledge.related import recover_interrupted as recover_related
     from knowledge.pipeline import recover_interrupted as recover_pipeline
+    from app.pdftranslate import tasks as pdftr_tasks
     with database.SessionLocal() as db:
         recover_interrupted(db)
         recover_related(db)
         recover_pipeline(db)
+        pdftr_tasks.recover_interrupted(db)
     logger.info("数据库就绪：%s", config.get_db_path())
     logger.info("PDF 存放目录：%s", config.get_pdf_dir())
     # Agent Harness 自检：启动时把已注册能力打出来，便于确认“新增技能/工具”是否生效
@@ -93,6 +119,7 @@ app.include_router(knowledge.router)
 app.include_router(related.router)
 app.include_router(reviews.router)
 app.include_router(translations.router)
+app.include_router(pdftranslate.router)
 
 
 @app.get("/api/health", tags=["meta"])
