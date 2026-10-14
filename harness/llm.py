@@ -125,8 +125,12 @@ def build_params(settings: LLMSettings, messages: List[Dict[str, Any]],
     if settings.reasoning_effort:
         extra["reasoning_effort"] = settings.reasoning_effort
     if settings.disable_thinking:
-        # 支持的模型经 extra_body 关思考（SDK 会合并到请求体顶层），不支持的会忽略该键。
-        extra["enable_thinking"] = False
+        # 关思考的两套开关：模型名带 deepseek 走 DeepSeek 官方口径 thinking.type=disabled；
+        # 其余（Qwen 系等）走 enable_thinking=false。不支持的实现会忽略未知键。
+        if "deepseek" in (settings.model or "").lower():
+            extra["thinking"] = {"type": "disabled"}
+        else:
+            extra["enable_thinking"] = False
     if extra:
         params["extra_body"] = extra
     if tools:
