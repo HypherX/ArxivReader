@@ -28,11 +28,15 @@ def translate_paper_block(paper_id: int, body: BlockTranslationRequest,
 
     必须声明在 /{kind}/{target_id} 之前：那条路由会先匹配到 /paper/123，
     再因为 kind 不在 Literal 里返回 422。
+
+    用划词翻译自定义端点（seltr.*，留空的字段跟随主 LLM 设置）——
+    划词是高频调用，用户通常会配一个便宜的模型。
     """
     if db.get(Paper, paper_id) is None:
         raise HTTPException(status_code=404, detail="论文不存在")
     return _run(db, lambda: translation.translate_paper_block(
-        db, paper_id, body.text, settings_store.get_llm_settings(db), body.output_language))
+        db, paper_id, body.text,
+        settings_store.get_selection_translation_settings(db), body.output_language))
 
 
 @router.post("/{kind}/{target_id}")

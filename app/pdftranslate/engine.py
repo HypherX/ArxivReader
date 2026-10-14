@@ -16,7 +16,9 @@ import select
 import signal
 import subprocess
 import sys
-import threading
+from typing import Tuple
+
+from harness import net
 
 from . import env as env_mod
 from .settings import SERVICES
@@ -24,7 +26,20 @@ from .settings import SERVICES
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------ 进度解析（同 zotero-pdf2zh）
-ANSI_ESCAPE = re.compile(r"(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]")
+# OSC（超链接/标题，\x1b]... 以 BEL 或 \x1b\\ 收尾）必须先于 CSI 洗掉，
+# 否则 rich 日志里的 ]8;;file:// 链接体会漏进日志视图。
+ANSI_ESCAPE = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)"
+                         r"|(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]")
+# 块末尾疑似未写完的转义序列（CSI/OSC/单字符）：留给下一块拼全后再清洗，
+# 否则 4096 字节切块会把 \x1b[ 与 0m 拆进两条日志，界面看到裸 [ / 0m 碎片。
+_INCOMPLETE_ANSI_RE = re.compile(r"\x1B(?:\[[0-?]*[ -/]*|\][^\x07\x1B]*|[(@-_][0-?]*)?$")
+
+def _split_incomplete_ansi(text: str) -> Tuple[str, str]:
+    """(可安全清洗的正文, 尾部未完成转义残片)。"""
+    match = _INCOMPLETE_ANSI_RE.search(text)
+    if not match:
+        return text, ""
+    return text[:match.start()], text[match.start():]
 # 主进度：translate 3/17 —— translate 与分数之间不允许出现字母/括号，
 # 避开 "Translate Paragraphs (1/1)" 这类子任务标题
 MAIN_PROGRESS_RE = re.compile(r"\btranslate\s+[^a-z()\r\n]*?(\d+)/(\d+)\b", re.IGNORECASE)
@@ -145,41 +160,12 @@ def _sanitize_no_proxy(value: str) -> str:
 def _private_host_bypass_hosts(base_url: str) -> list:
     """翻译端点是内网/本机地址时代理必然到不了，返回需要加进 no_proxy 的主机名。
 
-    公网地址或解析失败返回空列表（不改变现有代理行为）。
-    DNS 解析放线程里跑，3 秒超时，避免内网 DNS 卡住翻译启动。
+    公网地址或解析失败返回空列表（不改变现有代理行为）。判定逻辑见 harness.net。
     """
-    import ipaddress
-    import socket
-    from urllib.parse import urlparse
-
-    host = (urlparse(base_url or "").hostname or "").strip()
-    if not host:
-        return []
-
-    def _is_private(ip_text: str) -> bool:
-        try:
-            addr = ipaddress.ip_address(ip_text)
-        except ValueError:
-            return False
-        return addr.is_private or addr.is_loopback or addr.is_link_local
-
-    if _is_private(host):   # base_url 直接写的是 IP 字面量
+    host = net.host_of(base_url)
+    if host and net.is_private_base_url(base_url):
         return [host]
-
-    resolved = []
-
-    def _resolve() -> None:
-        try:
-            for family, _, _, _, sockaddr in socket.getaddrinfo(host, None):
-                if family in (socket.AF_INET, socket.AF_INET6):
-                    resolved.append(sockaddr[0])
-        except Exception:  # noqa: BLE001
-            pass
-
-    worker = threading.Thread(target=_resolve, daemon=True)
-    worker.start()
-    worker.join(timeout=3)
-    return [host] if any(_is_private(ip) for ip in resolved) else []
+    return []
 
 
 def _child_env(extra_no_proxy=None) -> dict:
@@ -271,6 +257,7 @@ def _run_pty(cmd: list, cancel_event, progress_cb, log_cb, child_env: dict) -> i
                             start_new_session=True)
     os.close(slave_fd)
     leftover = b""
+    ansi_tail = ""
     try:
         while True:
             if cancel_event.is_set():
@@ -290,7 +277,9 @@ def _run_pty(cmd: list, cancel_event, progress_cb, log_cb, child_env: dict) -> i
                 except UnicodeDecodeError as exc:
                     text = buf[:exc.start].decode("utf-8", errors="replace")
                     leftover = buf[exc.start:]
-                _parse_chunk(text, progress_cb, log_cb)
+                text, ansi_tail = _split_incomplete_ansi(ansi_tail + text)
+                if text:
+                    _parse_chunk(text, progress_cb, log_cb)
             if proc.poll() is not None:
                 # 收尾：把残余输出读完再退出
                 try:
@@ -300,7 +289,12 @@ def _run_pty(cmd: list, cancel_event, progress_cb, log_cb, child_env: dict) -> i
                         data = os.read(master_fd, 4096)
                         if not data:
                             break
-                        _parse_chunk(data.decode("utf-8", errors="replace"), progress_cb, log_cb)
+                        text, ansi_tail = _split_incomplete_ansi(
+                            ansi_tail + data.decode("utf-8", errors="replace"))
+                        if text:
+                            _parse_chunk(text, progress_cb, log_cb)
+                    if ansi_tail:
+                        _parse_chunk(ansi_tail, progress_cb, log_cb)
                 except Exception:  # noqa: BLE001
                     pass
                 break

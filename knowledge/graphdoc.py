@@ -50,8 +50,15 @@ def render_graph_md(db: Session, node: DirectionNode, language: Optional[str] = 
                   .order_by(PaperDirection.id).all())
     papers = [d.paper for d in directions if d.paper is not None]
     by_id = {p.id: p for p in papers}
-    edges = [e for e in db.query(PaperRelation).filter_by(node_id=node.id).order_by(PaperRelation.id)
-             if e.src_paper_id in by_id and e.dst_paper_id in by_id]
+    # 关系抽取按子树比对，边的另一端可能在后代节点：任一端属于当前层即收录，
+    # 外部端点论文补查出来渲染标题。
+    raw_edges = [e for e in db.query(PaperRelation).filter_by(node_id=node.id).order_by(PaperRelation.id)
+                 if e.src_paper_id in by_id or e.dst_paper_id in by_id]
+    external_ids = ({e.src_paper_id for e in raw_edges} | {e.dst_paper_id for e in raw_edges}) - set(by_id)
+    if external_ids:
+        for p in db.query(Paper).filter(Paper.id.in_(external_ids)).all():
+            by_id[p.id] = p
+    edges = [e for e in raw_edges if e.src_paper_id in by_id and e.dst_paper_id in by_id]
     nodes = db.query(DirectionNode).all()
     children = sorted((n for n in nodes if n.parent_id == node.id), key=lambda n: n.name)
     descendants, pending = {node.id}, [node.id]
@@ -71,8 +78,8 @@ def render_graph_md(db: Session, node: DirectionNode, language: Optional[str] = 
                      "> Direct papers: {} (subtree: {}) | Relationships: {} | Updated: {}").format(
                          len(papers), subtree, len(edges), updated.strftime("%Y-%m-%d %H:%M")), "",
                 "## 1. " + text("概览", "Overview"),
-                text("- 本文清单与关系仅涵盖当前层；祖先目录不是额外分类。",
-                     "- This list and its relationships cover direct papers only; ancestor folders are not additional classifications."),
+                text("- 论文清单仅涵盖当前层；关系边可链接后代目录中的论文（子树内比对）。",
+                     "- The paper list covers direct papers only; relationship edges may link papers in descendant folders (subtree comparison)."),
                 text("- 新综述请从文件夹菜单手动生成，默认包含全部后代论文。",
                      "- Generate a review manually from the folder menu; it includes all descendant papers by default.")])
     if children:
@@ -91,8 +98,9 @@ def render_graph_md(db: Session, node: DirectionNode, language: Optional[str] = 
     out.extend(["", "## 3. " + text("关系明细", "Relationship details"), ""])
     for edge in edges:
         src, dst = by_id[edge.src_paper_id], by_id[edge.dst_paper_id]
+        arrow = {"<->": "↔", "<-": "←"}.get(edge.direction, "→")
         out.extend(["### [{}](/?paper={}) {} [{}](/?paper={})".format(
-            _escape(src.title or src.arxiv_id), src.id, "↔" if edge.direction == "<->" else "→",
+            _escape(src.title or src.arxiv_id), src.id, arrow,
             _escape(dst.title or dst.arxiv_id), dst.id), "",
             text("关系：{} · 强度：{}", "Relationship: {} · Strength: {}").format(
                 _relation_label(edge.relation, language), round(edge.strength, 2)), ""])

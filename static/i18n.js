@@ -509,6 +509,11 @@
     "ui.ade67fee56af": ["新窗口打开", "Open in new tab"],
     "ui.82365ba5bc06": ["还没有翻译产物：选好输出方式后点「开始翻译」。", "No translated PDF yet: pick an output mode and start a translation."],
     "ui.a84280a89fc8": ["语言", "Languages"],
+    "ui.6cf2ac6561ef": ["划词翻译（选中文字）", "Selection translation (highlighted text)"],
+    "ui.af663d503a06": ["划词翻译调用频繁，建议单独配一个便宜的模型；字段留空即跟随上方主设置；已保存的自定义 Key 输入 default 可清除。", "Selection translation is called frequently — consider a cheaper model. Empty fields follow the main settings above; type default in the Key field to clear a saved custom key."],
+    "ui.c818e3d8ae98": ["已设置自定义 Key：", "Custom key set: "],
+    "ui.4597519e0ad4": ["未设置自定义 Key（跟随主设置）", "No custom key (following main settings)"],
+    "ui.8fa5a7efaadd": ["当前生效：", "Effective: "],
     "pdftr.bad_pages": ["页码范围不对：留空翻全文，或填 3、3-5 这样的范围（起始页 ≥ 1 且不超过结束页）", "Invalid page range: leave empty for the whole paper, or use formats like 3 or 3-5 (start ≥ 1 and ≤ end)"],
     "error.410": ["内容已不再可用", "This content is no longer available"]
   };

@@ -32,6 +32,7 @@ from harness.paper import PaperInput
 from harness.language import runtime_config, PROMPT_VERSION, choose
 
 from . import llm_steps, store
+from .arxiv_search import title_similarity
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,40 @@ class PipelineResult:
 def _tree_input(paper: Paper, summary_md: str, paths: Sequence[Any]) -> str:
     return json.dumps({"title": paper.title, "abstract": paper.abstract,
                        "summary": summary_md, "existing_nodes": list(paths)}, ensure_ascii=False)
+
+
+def _verify_edge_pairing(edges: List[Any], batch_others: Sequence[Dict[str, Any]],
+                         src_paper_id: int, node_path: str) -> List[Dict[str, Any]]:
+    """用回显标题校验「ID ↔ 理由」配对：多论文一批时模型可能把理由配错 ID。
+
+    - ID 不在本批、但回显标题能定位到批次内论文（≥0.5）：按标题救回；
+    - 回显与批次内另一篇更匹配（≥0.5）：以标题为准修正 other_paper_id；
+    - 回显与任何标题都对不上（<0.3）：配对无法核实，丢弃该边；
+    - 中间地带或无回显：仅当 ID 本身合法才保留。
+    """
+    titles = {int(p["id"]): str(p.get("title") or "") for p in batch_others}
+    checked: List[Dict[str, Any]] = []
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+        raw_id = edge.get("other_paper_id")
+        echo = str(edge.get("other_title") or "").strip()
+        scored = sorted(((title_similarity(echo, title), pid) for pid, title in titles.items()),
+                        key=lambda pair: -pair[0]) if echo else []
+        best_score, best_id = scored[0] if scored else (0.0, 0)
+        if echo and best_score >= 0.5:
+            if best_id != raw_id:
+                logger.warning("关系边配对纠正（paper=%s node=%s）：ID %r -> %s（回显标题 %r）",
+                               src_paper_id, node_path, raw_id, best_id, echo[:60])
+                edge["other_paper_id"] = best_id
+            checked.append(edge)
+        elif raw_id in titles and (not echo or best_score < 0.3 or (best_id == raw_id and best_score >= 0.3)):
+            # ID 合法且回显没有明确指向另一篇（回显缺失/不可识别/确证本人）→ 保留
+            checked.append(edge)
+        else:
+            logger.warning("关系边无法核实，丢弃（paper=%s node=%s）：id=%r echo=%r",
+                           src_paper_id, node_path, raw_id, echo[:60])
+    return checked
 
 
 def _relation_input(paper: Paper, deep_md: str, others: Sequence[Paper], language: str = "zh") -> str:
@@ -188,7 +223,7 @@ def _step_graph(db: Session, paper: Paper, *, force: bool, settings: Any,
         node = direction.node
         if node is None:
             continue
-        others = store.get_node_papers(db, node, exclude_paper_id=paper.id, limit=limit)
+        others = store.get_subtree_papers(db, node, exclude_paper_id=paper.id, limit=limit)
         inputs = [_relation_input(paper, artifact.content_md, others[start:start + 4], hcfg["output_language"])
                   for start in range(0, len(others), 4)]
         signature = hashlib.sha256(json.dumps([PROMPT_VERSION, hcfg["output_language"], inputs],
@@ -210,10 +245,9 @@ def _step_graph(db: Session, paper: Paper, *, force: bool, settings: Any,
             payload = out.data if isinstance(out.data, dict) else {}
             if not isinstance(payload.get("edges"), list):
                 raise ValueError(choose(hcfg, "关系结果必须含 edges 数组", "Relationship result requires an edges array"))
-            batch_ids = {p["id"] for p in json.loads(user_text)["others"]}
-            if any(not isinstance(e, dict) or e.get("other_paper_id") not in batch_ids for e in payload["edges"]):
-                raise ValueError(choose(hcfg, "关系目标不在本批材料中", "Relationship target is outside this batch"))
-            all_edges.extend(payload["edges"])
+            batch_others = json.loads(user_text)["others"]
+            # 逐边校验（坏边只丢不弃整批）：ID 合法性 + 回显标题配对纠正在内部完成
+            all_edges.extend(_verify_edge_pairing(payload["edges"], batch_others, paper.id, node.path))
             called += 1
             usages.append(out.usage or {})
         if should_stop and should_stop():
