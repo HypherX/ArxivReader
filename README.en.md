@@ -31,6 +31,7 @@
 |---|---|
 | 🖨 **Built-in PDF reader** | Rendered locally with PDF.js on a real text layer: wheel and two-finger trackpad scrolling, pinch or ⌘/Ctrl + wheel zoom anchored at the cursor, plus fit width, exact zoom, jump to page and rotate. |
 | 🖍 **Selection translation** | Select a word or a sentence, choose Translate, and the result lands in the translation panel beside the reader — translate several passages in a row, scroll back through them, copy any of them. |
+| 🌐 **Full-text translation** | Translate a whole PDF in one click: bilingual (side-by-side or alternating pages) or translation-only output, with formulas, figures and layout preserved in place; the reader then switches between original and translated views instantly. The engine downloads on first use (see "Full-text translation engine" below), and the translation model can be configured separately. |
 | 🔎 **Find in document** | Search a keyword across the whole PDF, see the hit count and step through each match. |
 | ⧉ **Select and copy** | The text layer is real text, so symbols, terms and paragraphs copy out cleanly. |
 | 📏 **Whole text, no truncation** | Extraction has no character ceiling, so the end of long papers, appendices and references stay answerable and page-citable. |
@@ -98,6 +99,27 @@ Use **Test connection** to verify (it makes one real request), then **Save**.
 
 ---
 
+## 🌐 Full-text translation engine (one-click install on first use)
+
+Full-text translation is powered by [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate-next) (pdf2zh_next). Its dependencies are heavy (onnxruntime, layout-analysis models — several hundred MB), so it is deliberately **not bundled with the app and not listed in requirements.txt**; it installs on demand into an isolated directory:
+
+1. Open any paper and press **🌐 Translate** in the reader toolbar;
+2. Press **Install engine** in the dialog — the log streams live, and one install lasts.
+
+The installer picks an environment automatically, in this order:
+
+- **[uv](https://docs.astral.sh/uv/) available (recommended)**: fastest, and it provisions Python 3.12 for you;
+- **Running from source**: without uv, your current Python (3.12+) is used;
+- **Desktop app**: without uv, a system `python3.12` is required — if neither exists, the dialog asks you to install uv first.
+
+On a network in mainland China, enable **Use China mirror when installing the engine** in **Settings → PDF full-text translation** (Tsinghua mirror) to speed things up. The first translation run additionally downloads layout-analysis models and fonts — that is expected.
+
+The translation model **follows your main model settings by default**, but full-text runs use a lot of tokens, so consider a cheaper service under **Settings → PDF full-text translation** — OpenAI-compatible, DeepSeek, Zhipu GLM, Gemini, SiliconFlow, Ollama (local), or free Bing/Google translation; QPS, source/target languages and the bilingual layout are all adjustable.
+
+The engine and translated PDFs live in the `pdftranslate/` subfolder of your data directory — back it up together with your data, or delete that subfolder to uninstall the engine completely.
+
+---
+
 ## 🗂 Where papers go
 
 A newly added paper belongs only to **All papers** — it is never pushed into a subfolder automatically. Afterwards you can:
@@ -146,6 +168,11 @@ No. Translations are cached in your local library by a hash of the source text, 
 <details>
 <summary><b>Can I stop a long run halfway?</b></summary>
 Every AI task can be stopped at any time; whatever was already generated is kept and saved, so nothing is spent for nothing.
+</details>
+
+<details>
+<summary><b>"Engine not installed" for full-text translation?</b></summary>
+Expected on first use — the engine downloads on demand: press <b>Install engine</b> in the dialog once. If installation fails, check the log shown in the dialog; it is usually a network issue, so enable the China mirror in Settings → PDF full-text translation and retry.
 </details>
 
 ---
