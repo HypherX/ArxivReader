@@ -42,10 +42,10 @@ def _backend(pipe, data_dir, ticket, cookie):
                 pass
             from harness.cancel import stop_all
             from app.database import SessionLocal
-            from app.models import FolderReview, RelatedRun, SearchRun
+            from app.models import FolderReview, RelatedRun
             stop_all()
             with SessionLocal() as db:
-                for model in (FolderReview, RelatedRun, SearchRun):
+                for model in (FolderReview, RelatedRun):
                     db.query(model).filter(model.status.in_(("running", "queued"))).update(
                         {"cancel_requested": True}, synchronize_session=False)
                 db.commit()
@@ -236,16 +236,6 @@ class _Bridge:
                 ctx["main"].restore(); ctx["main"].show()
             elif action == "open_external":
                 external(str(payload.get("url", "")), ctx["origin"])
-            elif action == "open_pdf":
-                paper_id = payload.get("id")
-                if not isinstance(paper_id, int) or paper_id < 1:
-                    raise ValueError("invalid_id")
-                with sqlite3.connect((ctx["data"] / "library.db").as_uri() + "?mode=ro", uri=True) as db:
-                    row = db.execute("SELECT pdf_path FROM papers WHERE id=?", (paper_id,)).fetchone()
-                path = Path(row[0]).resolve() if row and row[0] else None
-                if not path or not path.is_file() or path.suffix.lower() != ".pdf" or not path.is_relative_to(ctx["data"]):
-                    raise ValueError("invalid_pdf")
-                _open_file(path)
             else:
                 raise ValueError("unknown_action")
             return {"ok": True}

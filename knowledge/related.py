@@ -1,4 +1,5 @@
-"""关联检索：引用定位与主题扩展合并，完整摘要批量判定，再总结保留项。
+"""关联检索：读 Related Work 与 References 提取引用标题，arXiv 模糊检索，
+再按标题匹配度过滤、用摘要直接判定相关度，保留高分候选供用户筛选。
 
 失败与不相关分开保存；继续筛选和重试复用成功结果。任务固定语言快照，
 取消传入模型流和 arXiv 请求队列，所有退出路径均写入明确终态。
@@ -21,7 +22,7 @@ from sqlalchemy.orm import Session
 from app import arxiv_service, database, pdf_service, settings_store
 from harness.config import get_pdf_dir
 from app.models import Paper, RelatedCandidate, RelatedRun
-from harness import config as harness_config, runner
+from harness import config as harness_config
 from harness.paper import PaperInput
 from harness.cancel import Cancelled
 from harness.language import choose, runtime_config, PROMPT_VERSION
@@ -31,18 +32,18 @@ from . import arxiv_search, llm_steps, store
 
 logger = logging.getLogger(__name__)
 
-STAGES: Tuple[str, ...] = ("collect", "extract", "search", "judge", "summarize")
+STAGES: Tuple[str, ...] = ("collect", "extract", "search", "judge")
 STAGE_TITLES = {
-    "collect": "读取论文与引用材料", "extract": "提取引用与主题查询",
-    "search": "双路 arXiv 检索", "judge": "完整摘要批量筛选", "summarize": "保留候选快速总结",
+    "collect": "读取论文与引用材料", "extract": "提取引用标题",
+    "search": "arXiv 模糊检索", "judge": "按摘要判定相关度",
 }
 STAGE_TITLES_EN = {
-    "collect": "Collect source material", "extract": "Extract references and topics",
-    "search": "Two-route arXiv search", "judge": "Batch relevance screening",
-    "summarize": "Summarize retained candidates",
+    "collect": "Collect source material", "extract": "Extract citation titles",
+    "search": "Fuzzy arXiv search", "judge": "Judge relevance from abstracts",
 }
 RELATED_PIPELINE_STEPS: Tuple[str, ...] = ("tree", "deep", "graph")
 _RELEVANCE = {"strong", "related", "uncertain", "unrelated"}
+_RETAIN_SCORE_FLOOR = 0.6      # 相关度高于此值才保留给用户筛选，其余按不相关丢弃
 _EXTRACT_BUDGET = 10000
 
 
@@ -60,7 +61,7 @@ def _extract_sections(paper: Paper) -> Tuple[str, str]:
     return full_section("related_work"), full_section("references")
 
 
-def _seed_input(paper: Paper, related_text: str, refs_text: str, max_seeds: int) -> str:
+def _seed_input(paper: Paper, related_text: str, refs_text: str) -> str:
     doc = PaperInput.from_any(paper).document()
     method = doc.match_section("method")
     method_text = "\n".join(b.text for b in method.blocks) if method else ""
@@ -69,8 +70,8 @@ def _seed_input(paper: Paper, related_text: str, refs_text: str, max_seeds: int)
                                   "abstract": paper.abstract,
                                   "method": method_parts[0] if method_parts else "",
                                   "method_truncated": len(method_parts) > 1},
-                       "related_work": related_text, "references": refs_text,
-                       "max_seeds": max_seeds, "max_queries": 6}, ensure_ascii=False)
+                       "related_work": related_text, "references": refs_text},
+                       ensure_ascii=False)
 
 
 def _judge_input(paper: Paper, rows: List[RelatedCandidate]) -> str:
@@ -90,8 +91,8 @@ def _clamp_score(value: Any) -> float:
     return max(0.0, min(1.0, score)) if math.isfinite(score) else 0.0
 
 
-def _clean_seeds(payload: Any, max_seeds: int) -> List[Dict[str, str]]:
-    """清洗模型输出的种子：去空 / 去重 / 限长 / 限量。"""
+def _clean_seeds(payload: Any) -> List[Dict[str, str]]:
+    """清洗模型输出的种子：去空 / 去重 / 限长。不设数量上限——引用列表多长就取多长。"""
     raw = payload.get("seeds") if isinstance(payload, dict) else None
     seeds: List[Dict[str, str]] = []
     seen: set = set()
@@ -110,22 +111,7 @@ def _clean_seeds(payload: Any, max_seeds: int) -> List[Dict[str, str]]:
         seeds.append({"title": title[:300], "arxiv_id": aid,
                       "authors": str(item.get("authors") or "")[:120],
                       "reason": str(item.get("reason") or "")[:200]})
-        if len(seeds) >= max_seeds:
-            break
     return seeds
-
-
-def _clean_queries(payload: Any, limit: int = 6) -> List[Dict[str, Any]]:
-    queries = []
-    for item in payload.get("queries", []) if isinstance(payload, dict) else []:
-        if not isinstance(item, dict) or not isinstance(item.get("terms"), list):
-            continue
-        terms = [str(t).strip()[:120] for t in item["terms"] if isinstance(t, str) and t.strip()][:4]
-        if terms and terms not in [q["terms"] for q in queries]:
-            queries.append({"terms": terms, "reason": str(item.get("reason") or "")[:300]})
-        if len(queries) >= limit:
-            break
-    return queries
 
 
 def _validate_verdicts(data: Any, rows: List[RelatedCandidate], language: str = "zh") -> Dict[int, Dict[str, Any]]:
@@ -182,7 +168,7 @@ def iter_related_events(db: Session, run: RelatedRun, *,
     """流式执行关联检索 pipeline：每步产出事件（STAGE_TITLES），最后给 final。
 
     事件：{"type":"stage","stage":..,"title":..,"status":"running|done|failed","detail":..}
-          {"type":"progress","stage":"summarize|judge","done":..,"total":..}
+          {"type":"progress","stage":"judge","done":..,"total":..}
           {"type":"final","run_id":..,"status":..,"counters":{...}}
     """
     kcfg = kcfg or harness_config.get_knowledge_config()
@@ -195,10 +181,10 @@ def iter_related_events(db: Session, run: RelatedRun, *,
         yield _finish(db, run, "failed", {}, error=choose(hcfg, "论文不存在（可能已被删除）", "Source paper is missing or was deleted"))
         return
 
-    max_seeds = max(1, int(kcfg.get("related_max_seeds") or 20))
+    # 不再设"种子数 / 候选数 / 保留数"上限：引用与 Related Work 里提到多少就取多少。
+    # per_seed 是每个标题向 arXiv 取的模糊候选数（不是总量上限），batch_size 只是判定调用的
+    # token 分批，二者都不是功能限制。
     per_seed = max(1, int(kcfg.get("related_title_matches") or 3))
-    max_candidates = max(1, int(kcfg.get("related_max_candidates") or 120))
-    max_retained = max(1, int(kcfg.get("related_max_results") or 30))
     batch_size = max(1, min(8, int(kcfg.get("related_batch_size") or 8)))
     counters: Dict[str, Any] = dict(run.counters)
     titles = STAGE_TITLES_EN if hcfg["output_language"] == "en" else STAGE_TITLES
@@ -232,25 +218,24 @@ def iter_related_events(db: Session, run: RelatedRun, *,
             counters["search_complete"] = False
             yield _emit_stage("collect", "running")
             related_text, refs_text = _extract_sections(paper)
-            counters.update(related_work_chars=len(related_text), references_chars=len(refs_text),
-                            source_truncated=bool(paper.text_truncated),
-                            topic_fallback=not bool(related_text or refs_text))
-            if counters["topic_fallback"]:
-                store.log_related(db, run, choose(hcfg, "未识别到引用章节，使用标题、摘要和方法扩展主题。",
-                                                 "No reference sections found; using title, abstract and methods."), level="warn")
+            counters.update(related_work_chars=len(related_text), references_chars=len(refs_text))
+            if not related_text and not refs_text:
+                store.log_related(db, run, choose(hcfg, "未识别到 Related Work 或参考文献章节，本轮没有可提取的引用标题。",
+                                                  "No Related Work or References section found; no citation titles to extract."),
+                                  level="warn")
             yield _emit_stage("collect", "done")
             yield _emit_stage("extract", "running")
             pieces = [("related_work", p) for p in split_text(related_text, _EXTRACT_BUDGET)]
             pieces += [("references", p) for p in split_text(refs_text, _EXTRACT_BUDGET)]
-            seeds, queries = [], []
+            seeds = []
             extraction_cache = counters.setdefault("extraction_cache", {})
             search_cache = counters.setdefault("search_cache", {})
             counters["extraction_failed"] = 0
             counters["extraction_batches"] = len(pieces) or 1
-            for kind, text in pieces or [("topic", "")]:
+            for kind, text in pieces:
                 check()
                 material = _seed_input(paper, text if kind == "related_work" else "",
-                                       text if kind == "references" else "", max_seeds)
+                                       text if kind == "references" else "")
                 key = hashlib.sha256((PROMPT_VERSION + hcfg["output_language"] + material).encode()).hexdigest()
                 data = extraction_cache.get(key)
                 if data is None:
@@ -259,39 +244,32 @@ def iter_related_events(db: Session, run: RelatedRun, *,
                     counters["total_tokens"] = counters.get("total_tokens", 0) + (out.usage or {}).get("total_tokens", 0)
                     if not out.ok or not isinstance(out.data, dict):
                         counters["extraction_failed"] += 1
-                        store.log_related(db, run, out.error or choose(hcfg, "引用与主题提取失败", "Reference and topic extraction failed"), level="error")
+                        store.log_related(db, run, out.error or choose(hcfg, "引用标题提取失败", "Citation title extraction failed"), level="error")
                         continue
                     data = out.data
                     extraction_cache[key] = data
                     store.update_related_run(db, run, counters=counters)
-                extracted = _clean_seeds(data, max_seeds)
+                extracted = _clean_seeds(data)
                 # ID 必须能在提供的引用材料中找到，防止模型伪造确定引用。
                 for seed in extracted:
                     if seed["arxiv_id"] and seed["arxiv_id"] not in text:
                         seed["arxiv_id"] = ""
                 seeds += extracted
-                queries += _clean_queries(data)
-            seeds = _clean_seeds({"seeds": seeds}, max_seeds)
-            queries = _clean_queries({"queries": queries}, max(1, min(6, int(kcfg.get("related_topic_queries") or 6))))
-            if not queries and not seeds:
-                terms = arxiv_search.title_terms(paper.title, limit=3)
-                queries = [{"terms": terms, "reason": choose(hcfg, "从标题扩展主题", "Topic fallback from the title")}] if terms else []
-            counters.update(seeds=len(seeds), queries=len(queries), query_plan={"seeds": seeds, "queries": queries})
+            seeds = _clean_seeds({"seeds": seeds})
+            counters.update(seeds=len(seeds), query_plan={"seeds": seeds})
             yield _emit_stage("extract", "done")
             yield _emit_stage("search", "running")
             collected = {}
             counters.update(raw_hits=0, duplicated=0, self_excluded=0, search_failed=0)
-            routes = [("reference", seed) for seed in seeds] + [("topic", query) for query in queries]
-            for kind, query in routes:
+            for seed in seeds:
                 check()
                 try:
-                    key = hashlib.sha256(json.dumps([kind, query, per_seed], sort_keys=True).encode()).hexdigest()
+                    key = hashlib.sha256(json.dumps([seed["title"], seed["arxiv_id"], per_seed],
+                                                    sort_keys=True).encode()).hexdigest()
                     if key in search_cache:
                         hits = [arxiv_search.SearchHit(**hit) for hit in search_cache[key]]
                     else:
-                        hits = (arxiv_search.search_reference(query, max_results=per_seed, should_stop=check)
-                                if kind == "reference" else
-                                arxiv_search.search_topic(query["terms"], max_results=20, should_stop=check))
+                        hits = arxiv_search.search_reference(seed, max_results=per_seed, should_stop=check)
                         search_cache[key] = [hit.as_dict() for hit in hits]
                         store.update_related_run(db, run, counters=counters)
                 except Cancelled:
@@ -306,19 +284,17 @@ def iter_related_events(db: Session, run: RelatedRun, *,
                     if hit.arxiv_id == arxiv_service.strip_version(paper.arxiv_id):
                         counters["self_excluded"] += 1
                         continue
-                    source = {"kind": kind, "seed": query, "exact_reference": False}
+                    source = {"kind": "reference", "seed": seed, "exact_reference": False}
                     hit.query_sources = (hit.query_sources or []) + [source]
                     if hit.arxiv_id in collected:
                         old = collected[hit.arxiv_id][0]
                         old.query_sources += hit.query_sources
                         old.match_score = max(old.match_score, hit.match_score)
                         continue
-                    collected[hit.arxiv_id] = (hit, query.get("title") or " / ".join(query.get("terms", [])))
+                    collected[hit.arxiv_id] = (hit, seed["title"])
             counters["found"] = len(collected)
             counters["deduplicated_hits"] = counters["raw_hits"] - len(collected) - counters["self_excluded"]
-            selected = sorted(collected.values(), key=lambda pair: -pair[0].match_score)[:max_candidates]
-            counters["candidate_limit"] = max_candidates
-            counters["candidates_truncated"] = max(0, len(collected) - len(selected))
+            selected = sorted(collected.values(), key=lambda pair: -pair[0].match_score)
             for hit, seed_title in selected:
                 row, created = store.upsert_related_candidate(db, source_paper_id=paper.id,
                     hit=hit, seed_title=seed_title, run_id=run.id)
@@ -341,12 +317,12 @@ def iter_related_events(db: Session, run: RelatedRun, *,
             db.commit()
         pending = [r for r in rows if not r.relevance or r.processing_error.startswith("judge:")]
         counters["selected"] = len(pending)
-        counters["result_limit"] = max_retained
         yield _emit_stage("judge", "running")
-        retained, processed = [], 0
-        while processed < len(pending) and len(retained) < max_retained:
+        # 逐批判定，直到全部候选都有结论：batch_size 只是单次调用的 token 分批，不是保留上限
+        processed = 0
+        while processed < len(pending):
             check()
-            batch = pending[processed:processed + min(batch_size, max_retained - len(retained))]
+            batch = pending[processed:processed + batch_size]
             try:
                 out = llm_steps.call_structured("related_judge.md", _judge_input(paper, batch),
                                                 settings, cfg=hcfg, should_stop=check)
@@ -360,8 +336,10 @@ def iter_related_events(db: Session, run: RelatedRun, *,
                     store.set_related_verdict(db, row, relevance=item["relevance"],
                                               score=item["score"], reason=item["reason"])
                     counters[row.relevance] = counters.get(row.relevance, 0) + 1
-                    if row.relevance != "unrelated":
-                        retained.append(row)
+                    # 相关度不高于阈值的候选直接丢弃，不进入用户筛选列表（已入库的不动）。
+                    if row.relevance_score <= _RETAIN_SCORE_FLOOR and row.status != store.RELATED_PROMOTED:
+                        store.discard_related_candidate(db, row)
+                        counters["dropped_low_score"] = counters.get("dropped_low_score", 0) + 1
             except Cancelled:
                 raise
             except Exception as exc:
@@ -372,34 +350,6 @@ def iter_related_events(db: Session, run: RelatedRun, *,
                    "total": len(pending), "counters": dict(counters)}
         counters["remaining"] = len(pending) - processed
         yield _emit_stage("judge", "done")
-        yield _emit_stage("summarize", "running")
-        # 已判定但总结失败的条目直接重试总结，不重复付费判定。
-        summary_rows = retained + [r for r in rows if r not in retained and r.relevance in
-                                   ("strong", "related", "uncertain") and (not r.summary_text or r.processing_error.startswith("summary:"))]
-        for index, row in enumerate(summary_rows):
-            check()
-            if row.summary_text and not row.processing_error.startswith("summary:"):
-                continue
-            try:
-                summary = runner.run_skill("quick_summary", PaperInput(arxiv_id=row.arxiv_id,
-                    title=row.title, abstract=row.abstract, authors=row.authors,
-                    categories=row.categories, published=row.published), settings, cfg=hcfg, should_stop=check)
-                if summary.error or not summary.output.strip():
-                    raise ValueError(summary.error or choose(hcfg, "总结为空", "Empty summary"))
-                store.set_related_summary(db, row, summary_text=summary.output,
-                    stats={**(summary.stats or {}), "seed": row.seed_title, "output_language": hcfg["output_language"]})
-                row.processing_error = ""
-                db.commit()
-                counters["summarized"] = counters.get("summarized", 0) + 1
-                counters["total_tokens"] = counters.get("total_tokens", 0) + (summary.stats or {}).get("usage", {}).get("total_tokens", 0)
-            except Cancelled:
-                raise
-            except Exception as exc:
-                db.rollback()
-                failure([row], "summary", exc)
-            yield {"type": "progress", "stage": "summarize", "done": index + 1,
-                   "total": len(summary_rows), "counters": dict(counters)}
-        yield _emit_stage("summarize", "done")
         incomplete = any(counters.get(k) for k in ("failed", "search_failed", "extraction_failed"))
         yield _finish(db, run, "failed" if incomplete else "done", counters,
                       error=choose(hcfg, "部分阶段失败；结果已保留，可重试。", "Some stages failed; saved results can be retried.") if incomplete else "")
@@ -539,11 +489,10 @@ def promote_related_candidate(db: Session, row: RelatedCandidate, *,
     existing = db.query(Paper).filter(Paper.arxiv_id == row.arxiv_id).first()
     if existing is None:
         meta = arxiv_service.fetch_metadata(row.arxiv_id)
-        folder = database.ensure_inbox(db)      # 先落 Inbox；tree 步骤会把它移入方向文件夹
-        dest_dir = os.path.join(get_pdf_dir(),
-                                arxiv_service.safe_dirname(folder.name))
+        # 先不落任何文件夹：提升后只属于"全部论文"，tree 步骤若跑过会自动移入方向文件夹
+        dest_dir = os.path.join(get_pdf_dir(), arxiv_service.safe_dirname(arxiv_service.UNFILED_DIR))
         pdf_path = arxiv_service.download_pdf(meta, dest_dir)
-        text, truncated = pdf_service.extract_text_for_context(str(pdf_path))
+        text = pdf_service.extract_text(str(pdf_path))
         existing = Paper(arxiv_id=meta.arxiv_id, title=meta.title or row.title,
                          authors_json=json.dumps(meta.authors or row.authors, ensure_ascii=False),
                          abstract=meta.abstract or row.abstract,
@@ -551,7 +500,7 @@ def promote_related_candidate(db: Session, row: RelatedCandidate, *,
                                                     ensure_ascii=False),
                          published=meta.published or row.published,
                          pdf_url=meta.pdf_url, pdf_path=str(pdf_path), folder_id=folder.id,
-                         full_text=text, text_truncated=truncated)
+                         full_text=text)
         db.add(existing)
         db.commit()
         db.refresh(existing)

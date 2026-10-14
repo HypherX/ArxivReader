@@ -20,13 +20,9 @@ from harness import config
 
 logger = logging.getLogger(__name__)
 
-# 未命中任何归档规则的论文落入该系统默认文件夹
-INBOX_NAME = "Inbox"
-
 # 前向迁移清单：表 -> [(列名, SQLite 列定义)]；只在列缺失时 ALTER TABLE ADD COLUMN
 _ADDITIVE_COLUMNS = {
     "chat_messages": [("reasoning_content", "TEXT NOT NULL DEFAULT ''")],
-    "papers": [("placement_source", "VARCHAR(16) NOT NULL DEFAULT 'auto'")],
     "paper_directions": [("relations_at", "DATETIME"),
                          ("relations_signature", "VARCHAR(64) NOT NULL DEFAULT ''"),
                          ("relations_count", "INTEGER NOT NULL DEFAULT 0"),
@@ -40,10 +36,14 @@ _ADDITIVE_COLUMNS = {
     "folders": [("direction_node_id", "INTEGER")],
     "direction_nodes": [("graph_md_path", "TEXT NOT NULL DEFAULT ''"),
                         ("graph_md_at", "DATETIME")],
-    "buffer_papers": [("promote_state", "VARCHAR(16) NOT NULL DEFAULT ''"),
-                      ("promote_error", "TEXT NOT NULL DEFAULT ''"),
-                      ("promoted_paper_id", "INTEGER")],
 }
+
+# 撤除的列：全文不再按字符上限截断，papers.text_truncated 成为死字段。
+# 必须真的删掉——模型里已经没有它，留着 NOT NULL 又无默认值的列会让 INSERT 失败。
+_DROP_COLUMNS = {"papers": ("text_truncated", "placement_source")}
+
+# 撤除的表：arXiv 批量检索（含待读缓冲区）与归档规则整体下线。
+_DROP_TABLES = ("filing_rules", "search_runs", "buffer_papers")
 
 # 表重命名（只在旧表存在且新表不存在时执行，必须先于 create_all）
 _TABLE_RENAMES = {
@@ -79,36 +79,8 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-def ensure_inbox(db: Session) -> "models.Folder":
-    """取得（或创建）顶层 Inbox 文件夹，作为未归档论文的兜底位置。"""
-    from . import models
-
-    identity = db.get(models.Setting, "system.inbox_id")
-    if identity and identity.value.isdigit():
-        existing = db.get(models.Folder, int(identity.value))
-        if existing is not None:
-            return existing
-    inbox = (
-        db.query(models.Folder)
-        .filter(models.Folder.name == INBOX_NAME, models.Folder.parent_id.is_(None))
-        .first()
-    )
-    if inbox is None:
-        inbox = models.Folder(name=INBOX_NAME, parent_id=None)
-        db.add(inbox)
-        db.commit()
-        db.refresh(inbox)
-    if identity is None:
-        identity = models.Setting(key="system.inbox_id", value=str(inbox.id))
-        db.add(identity)
-    else:
-        identity.value = str(inbox.id)
-    db.commit()
-    return inbox
-
-
 def init_db() -> None:
-    """迁移 + 建表（幂等）+ 创建默认 Inbox 文件夹。
+    """迁移 + 建表（幂等）：前向补列、撤除已下线功能的表与列。
 
     顺序很重要：先做表重命名，再 create_all（否则会同时留下新旧两张表），
     最后补新增列。
@@ -119,14 +91,56 @@ def init_db() -> None:
     _migrate_table_renames()
     Base.metadata.create_all(bind=engine)
     _migrate_additive_columns()
+    _migrate_drop_columns()
+    _migrate_drop_tables()
     _migrate_single_classification()
     _migrate_legacy_relevance()
 
     db = SessionLocal()
     try:
-        ensure_inbox(db)
+        _retire_inbox(db)
     finally:
         db.close()
+
+
+def _retire_inbox(db) -> None:
+    """归档规则与 Inbox 下线：原 Inbox 里的论文回到"全部论文"，空文件夹随后删除。"""
+    from . import models
+    inbox = db.query(models.Folder).filter_by(name="Inbox", parent_id=None).first()
+    if inbox is None:
+        return
+    db.query(models.Paper).filter_by(folder_id=inbox.id).update({"folder_id": None},
+                                                                synchronize_session=False)
+    db.delete(inbox)
+    db.commit()
+    logger.info("Inbox 已下线：其中的论文改为只属于「全部论文」")
+
+
+def _migrate_drop_columns() -> None:
+    """撤除已废弃列（幂等）。列在模型里已不存在，留着会让 INSERT 撞上 NOT NULL。"""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table, columns in _DROP_COLUMNS.items():
+            if table not in tables:
+                continue
+            existing = {column["name"] for column in inspector.get_columns(table)}
+            for column in columns:
+                if column not in existing:
+                    continue
+                conn.execute(sql_text("ALTER TABLE {} DROP COLUMN {}".format(table, column)))
+                logger.info("已撤除废弃列：%s.%s", table, column)
+
+
+def _migrate_drop_tables() -> None:
+    """撤除已下线功能的表（幂等）：留着只会让老库多几张没人读的空表。"""
+    inspector = inspect(engine)
+    existing = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table in _DROP_TABLES:
+            if table in existing:
+                conn.execute(sql_text("DROP TABLE IF EXISTS {}".format(table)))
+                logger.info("已撤除废弃表：%s", table)
 
 
 def _migrate_legacy_relevance() -> None:

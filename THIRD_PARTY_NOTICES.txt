@@ -12,8 +12,12 @@ https://www.gnu.org/licenses/agpl-3.0.html
 Before public distribution, determine the applicable AGPL obligations or obtain a commercial license.
 
 前端资源 / Frontend resources
-markdown-it, DOMPurify, KaTeX and bundled fonts retain their original licenses.
+markdown-it, DOMPurify, KaTeX, PDF.js and bundled fonts retain their original licenses.
 Exact license texts, versions and checksums are included under static/vendor/.
+PDF.js 附带 standard_fonts 与 cmaps 两套按需加载资源，其内层文件（含 Foxit / Adobe
+来源的字体与字符映射）各自保留原始许可声明。
+PDF.js also ships standard_fonts and cmaps, whose individual files keep their own
+original notices.
 
 桌面与 Python 依赖 / Desktop and Python dependencies
 Python, pywebview, PyInstaller and runtime dependencies retain their respective licenses.

@@ -53,8 +53,6 @@
     var url = new URL(link.href, location.href);
     if (/^https?:$/.test(url.protocol) && url.origin !== location.origin) {
       event.preventDefault(); call("open_external", { url: url.href }).catch(failed);
-    } else if (url.origin === location.origin && /^\/api\/papers\/\d+\/pdf$/.test(url.pathname)) {
-      event.preventDefault(); call("open_pdf", { id: Number(url.pathname.split("/")[3]) }).catch(failed);
     } else if (url.origin === location.origin && url.pathname === "/" && location.pathname === "/reader.html") {
       event.preventDefault(); call("focus_main").catch(failed);
     } else if (url.protocol !== "http:" && url.protocol !== "https:") event.preventDefault();

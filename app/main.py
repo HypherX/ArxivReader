@@ -19,8 +19,8 @@ from fastapi.staticfiles import StaticFiles
 
 from harness import config
 from . import database
-from .routers import cancel, chat, folders, knowledge, papers, related, reviews, rules, search, skills, translations
-from .routers import settings as settings_router
+from .routers import (cancel, chat, folders, knowledge, papers, related, reviews,
+                      settings as settings_router, skills, translations)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("ArxivReader")
@@ -59,8 +59,6 @@ async def lifespan(app: FastAPI):
     logger.info("Agent Harness：技能=%s；工具=%s",
                 ",".join(harness_skills.skill_names()), ",".join(harness_tools.tool_names()))
     logger.info("知识网络 pipeline：%s", " -> ".join(knowledge_steps))
-    from knowledge import SEARCH_STAGES as search_stages
-    logger.info("检索 pipeline：%s", " -> ".join(search_stages))
     from knowledge import RELATED_STAGES as related_stages
     logger.info("关联检索 pipeline：%s", " -> ".join(related_stages))
     yield
@@ -88,12 +86,10 @@ async def validation_error(request, exc):
 app.include_router(cancel.router)
 app.include_router(folders.router)
 app.include_router(papers.router)
-app.include_router(rules.router)
 app.include_router(settings_router.router)
 app.include_router(chat.router)
 app.include_router(skills.router)
 app.include_router(knowledge.router)
-app.include_router(search.router)
 app.include_router(related.router)
 app.include_router(reviews.router)
 app.include_router(translations.router)

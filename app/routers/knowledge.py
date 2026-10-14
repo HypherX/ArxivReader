@@ -39,8 +39,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["knowledge"])
 
-# 阅读产物：kind -> 中文名（前端页签与导出文件名共用）
-ARTIFACT_TITLES = {store.ARTIFACT_SUMMARY: "快速总结", store.ARTIFACT_DEEP: "深度精读"}
+# 阅读产物：kind -> (中文名, 英文名, 缺失时的提示)。这个字典同时是 kind 白名单。
+ARTIFACT_TITLES = {
+    store.ARTIFACT_SUMMARY: ("快速总结", "Quick summary", "先跑一次知识网络 pipeline"),
+    store.ARTIFACT_DEEP: ("深度精读", "Deep reading", "先跑一次知识网络 pipeline"),
+}
 
 _SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -205,8 +208,8 @@ def get_paper_artifact(paper_id: int, kind: str,
     row = (db.query(PaperArtifactVersion).filter_by(id=version, paper_id=paper.id, kind=kind).first()
            if isinstance(version, int) else store.get_artifact(db, paper.id, kind))
     if row is None or not (row.content_md or "").strip():
-        raise HTTPException(status_code=404, detail="还没有「{}」：先跑一次知识网络 pipeline".format(
-            ARTIFACT_TITLES[kind]))
+        title_zh, _title_en, hint = ARTIFACT_TITLES[kind]
+        raise HTTPException(status_code=404, detail="还没有「{}」：{}".format(title_zh, hint))
     if raw:
         return Response(content=row.content_md, media_type="text/markdown; charset=utf-8",
                         headers={"Content-Disposition": 'inline; filename="{}-{}.md"'.format(
@@ -218,8 +221,8 @@ def get_paper_artifact(paper_id: int, kind: str,
         "arxiv_id": paper.arxiv_id,
         "version_id": row.id if isinstance(row, PaperArtifactVersion) else None,
         "kind": row.kind,
-        "title": choose(settings_store.get_harness_settings(db), ARTIFACT_TITLES[kind],
-                                "Quick summary" if kind == store.ARTIFACT_SUMMARY else "Deep reading"),
+        "title": choose(settings_store.get_harness_settings(db), ARTIFACT_TITLES[kind][0],
+                        ARTIFACT_TITLES[kind][1]),
         "content_md": row.content_md,
         "chars": len(row.content_md or ""),
         "model": row.model,

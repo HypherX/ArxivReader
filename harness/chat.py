@@ -84,7 +84,6 @@ def build_chat_messages(paper: Any, history: List[Dict[str, str]], question: str
         "output_language": output_language,
         "prompt_version": PROMPT_VERSION,
         "source_coverage": "full_text" if paper_input.has_body else "abstract_only",
-        "source_truncated": paper_input.text_truncated,
         "context_tokens_est": tokens.estimate_tokens(system),
         "history_messages": len(kept),
         "history_dropped": max(0, len(history or []) - len(kept)),

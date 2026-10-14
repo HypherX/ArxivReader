@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-MatchType = Literal["category", "keyword", "author", "title"]
 
 
 # ---------------- Folder ----------------
@@ -44,7 +43,6 @@ class FolderNode(BaseModel):
     subtree_paper_count: int = 0
     path: str = ""
     display_name: str = ""
-    system_kind: str = ""
     direction_node_id: Optional[int] = None
     children: List["FolderNode"] = []
 
@@ -78,42 +76,9 @@ class PaperOut(BaseModel):
     folder_id: Optional[int] = None
     folder_name: Optional[str] = None
     folder_is_direction: bool = False
-    text_truncated: bool = False
     has_text: bool = False
     text_chars: int = 0
     added_at: Optional[datetime.datetime] = None
-
-
-# ---------------- FilingRule ----------------
-class RuleCreate(BaseModel):
-    name: str = ""
-    match_type: MatchType
-    pattern: str = Field(..., min_length=1)
-    folder_id: Optional[int] = None
-    priority: int = 100
-    enabled: bool = True
-
-
-class RuleUpdate(BaseModel):
-    name: Optional[str] = None
-    match_type: Optional[MatchType] = None
-    pattern: Optional[str] = None
-    folder_id: Optional[int] = None
-    priority: Optional[int] = None
-    enabled: Optional[bool] = None
-
-
-class RuleOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    name: str
-    match_type: str
-    pattern: str
-    folder_id: Optional[int] = None
-    folder_name: Optional[str] = None
-    priority: int
-    enabled: bool
 
 
 # ---------------- Chat ----------------
@@ -242,95 +207,6 @@ class PipelineRunOut(BaseModel):
     error: str = ""
 
 
-# ---------------- ArXiv 检索 Pipeline / 待读缓冲区 ----------------
-class SearchRunRequest(BaseModel):
-    """检索表单：日期范围 + 多分类 + 关键词组合（只取元信息，不下载全文）。"""
-
-    categories: List[str] = []
-    keywords: List[str] = []
-    date_from: Optional[str] = None          # YYYY-MM-DD
-    date_to: Optional[str] = None
-    max_results: int = Field(default=40, ge=1, le=500)
-    sort_by: Literal["submitted", "relevance"] = "submitted"
-    keyword_mode: Literal["and", "or"] = "and"   # 多关键词之间取交集还是并集
-    # 内联覆盖（不填则用 config.py 的 KNOWLEDGE 配置）
-    min_score: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    max_summarize: Optional[int] = Field(default=None, ge=0, le=50)
-
-
-class SearchRunOut(BaseModel):
-    id: int
-    status: str
-    stage: str = ""
-    counters: Dict[str, Any] = {}
-    error: str = ""
-    stages_done: List[str] = []
-    cancel_requested: bool = False
-    started_at: Optional[datetime.datetime] = None
-    finished_at: Optional[datetime.datetime] = None
-    request: Dict[str, Any] = {}
-    logs: List[Dict[str, Any]] = []
-    log_total: int = 0
-
-
-class BufferPaperOut(BaseModel):
-    """待读缓冲区条目：只有元信息 + 预筛/摘要结果，尚未深读与入图谱。"""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    arxiv_id: str
-    title: str
-    abstract: str = ""
-    authors: List[str] = []
-    categories: List[str] = []
-    published: Optional[str] = None
-    match_score: float = 0.0
-    suggested_path: str = ""
-    verified_path: str = ""
-    screen_reason: str = ""
-    verify_reason: str = ""
-    summary_text: str = ""
-    status: str = "pending"
-    promote_state: str = ""
-    promote_error: str = ""
-    promoted_paper_id: Optional[int] = None
-    matched_node_id: Optional[int] = None
-    search_run_id: Optional[int] = None
-    source: str = "search"
-    created_at: Optional[datetime.datetime] = None
-    updated_at: Optional[datetime.datetime] = None
-
-
-class BufferListOut(BaseModel):
-    items: List[BufferPaperOut] = []
-    counts: Dict[str, int] = {}
-
-
-class BufferBatchRejectRequest(BaseModel):
-    """批量丢弃：一次提交多个缓冲区条目 id。"""
-
-    ids: List[int] = Field(..., min_length=1, max_length=500)
-
-
-class BufferBatchRejectOut(BaseModel):
-    """批量丢弃结果：skipped 包含不存在的 id 与提升中的 id。"""
-
-    rejected: int = 0
-    rejected_ids: List[int] = []
-    skipped_ids: List[int] = []
-    counts: Dict[str, int] = {}
-
-
-class PromoteOut(BaseModel):
-    """提升入库（加入详细阅读）：后台执行时只看 promote_state 轮询。"""
-
-    buffer_id: int
-    promote_state: str
-    paper_id: Optional[int] = None
-    pipeline: Optional[Dict[str, Any]] = None
-
-
 # ---------------- 智能关联检索（Related Work） ----------------
 class RelatedRunOut(BaseModel):
     """关联检索 run 状态（轮询用）：阶段 / 计数 / 实时日志。"""
@@ -382,7 +258,6 @@ class RelatedCandidateOut(BaseModel):
     promote_error: str = ""
     promoted_paper_id: Optional[int] = None
     in_library: bool = False
-    in_buffer: bool = False
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
 

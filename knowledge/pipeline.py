@@ -79,7 +79,7 @@ def _relation_input(paper: Paper, deep_md: str, others: Sequence[Paper], languag
         notes = note or "\n\n".join(a.content_md for a in p.artifacts)
         return {"id": p.id, "title": p.title, "abstract": p.abstract,
                 "notes": notes[:_DEEP_NOTE_LIMIT], "notes_truncated": len(notes) > _DEEP_NOTE_LIMIT,
-                "source_text": rendered.text, "source_truncated": rendered.truncated or p.text_truncated,
+                "source_text": rendered.text, "context_truncated": rendered.truncated,
                 "coverage": "full_text" if p.full_text else "abstract_only"}
     return json.dumps({"source": material(paper, deep_md),
                        "others": [material(p) for p in others]}, ensure_ascii=False)
@@ -116,7 +116,7 @@ def _step_tree(db: Session, paper: Paper, *, force: bool, settings: Any,
     if artifact is None:
         raise RuntimeError(choose(hcfg, "缺少摘要产物：请先运行 summary 步骤", "Missing summary; run the summary step first"))
     existing = store.paper_memberships(db, paper.id)
-    if paper.placement_source in ("manual", "rule") and not force:
+    if paper.folder is not None and not paper.folder.direction_node_id and not force:
         return {"status": "skipped", "detail": choose(hcfg, "保留用户指定的文件夹位置", "Preserved the user-selected folder")}
     if existing and kcfg.get("reuse_artifacts", True) and not force:
         return {"status": "skipped",

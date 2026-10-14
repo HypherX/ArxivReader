@@ -79,7 +79,7 @@ def snapshot_folder(db: Session, folder_id: int) -> tuple:
                          "title": paper.title, "year": (paper.published or "")[:4],
                          "authors": paper.authors, "abstract": paper.abstract,
                          "notes": notes, "source_text": "" if notes else (paper.full_text or ""),
-                         "coverage": source, "source_truncated": bool(paper.text_truncated),
+                         "coverage": source,
                          "folder_id": paper.folder_id})
     return store.folder_path(db, folder), snapshot
 
@@ -93,7 +93,6 @@ def _parts(snapshot: List[dict], budget: int) -> List[dict]:
             parts.append({"id": "{}:{}".format(paper["paper_id"], index),
                           "paper_id": paper["paper_id"], "title": paper["title"],
                           "year": paper["year"], "coverage": paper["coverage"],
-                          "source_truncated": paper["source_truncated"],
                           "part": index + 1, "parts": len(chunks), "material": chunk})
     return parts
 
@@ -104,7 +103,7 @@ def preview(db: Session, folder_id: int) -> Dict[str, Any]:
     coverage = {kind: sum(p["coverage"] == kind for p in snapshot)
                 for kind in ("notes", "full_text", "abstract_only")}
     return {"folder_id": folder_id, "path": path, "paper_count": len(snapshot),
-            "coverage": coverage, "source_truncated": sum(p["source_truncated"] for p in snapshot),
+            "coverage": coverage,
             "estimated_evidence_batches": len(groups), "estimated_min_calls": len(groups) + 1,
             "papers": [{k: p[k] for k in ("paper_id", "title", "year", "coverage")} for p in snapshot]}
 
@@ -318,8 +317,6 @@ def run_review(db: Session, row: FolderReview, settings: Any, *, should_stop: An
                   "abstract_only": choose(cfg, "仅摘要", "Abstract only")}
         for p in snapshot:
             source = labels[p["coverage"]]
-            if p["source_truncated"]:
-                source += choose(cfg, "；原文抽取曾截断", "; source extraction was truncated")
             lines.append("- [{}]({}) — {} · {} · {}".format(_escape(p["title"]), "/?paper={}".format(p["paper_id"]),
                          p["year"], _escape(p["arxiv_id"]), source))
         row.content_md = intro + text.strip() + "\n\n## " + bibliography + "\n\n" + "\n".join(lines)

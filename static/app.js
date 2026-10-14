@@ -9,8 +9,8 @@
     selectedFolderId: null, // null = 全部
     papers: [],
     papersLoading: false,
-    bufferReady: false,
-    artifacts: {},          // 当前论文的阅读产物元信息：kind -> {chars, updated_at, …}
+    artifacts: {},
+    knowledge: { memberships: [], edges: [] },          // 当前论文的阅读产物元信息：kind -> {chars, updated_at, …}
     currentPaper: null,
     search: "",
     sessions: [],
@@ -222,7 +222,7 @@
   // ---------------- 文件夹 ----------------
   function flatten(nodes, depth, out) {
     nodes.forEach(function (n) {
-      out.push({ id: n.id, name: n.name, system_kind: n.system_kind, depth: depth });
+      out.push({ id: n.id, name: n.name, depth: depth });
       state.folderMap[n.id] = n;
       if (n.children && n.children.length) flatten(n.children, depth + 1, out);
     });
@@ -270,10 +270,10 @@
       var row = el("div", {
         class: "folder-row" + (state.selectedFolderId === n.id ? " selected" : ""),
         style: "--folder-depth:" + depth, "data-id": n.id, role: "treeitem", tabindex: "0",
-        title: function () { return (n.system_kind === "inbox" ? I18n.t("system.inbox") : (n.path || n.name)) + I18n.t("ui.feef1407b5dc") + n.paper_count + I18n.t("ui.c595735ca64c") + n.subtree_paper_count; },
+        title: function () { return (n.path || n.name) + I18n.t("ui.feef1407b5dc") + (n.subtree_paper_count || 0); },
         "aria-level": String(depth + 1), "aria-selected": String(state.selectedFolderId === n.id)
-      }, [toggle, folderIcon(), el("span", { class: "fname", text: function () { return n.system_kind === "inbox" ? I18n.t("system.inbox") : n.name; } }),
-        el("span", { class: "count", text: String(n.paper_count || 0) + " / " + (n.subtree_paper_count || 0) }),
+      }, [toggle, folderIcon(), el("span", { class: "fname", text: function () { return n.name; } }),
+        el("span", { class: "count", text: String(n.subtree_paper_count || 0) }),
         el("button", { class: "folder-menu mini", title: function () { return I18n.t("ui.76a53e4eb3e4"); }, text: "⋯", onclick: function (e) {
           e.stopPropagation(); openCtxMenu(e, n);
         } })]);
@@ -315,8 +315,8 @@
   }
 
   function deleteFolder(node) {
-    askConfirm(function () { return I18n.t("ui.780dfc4c1142"); }, [function () { return I18n.t("folder.delete_question", { name: node.system_kind === "inbox" ? I18n.t("system.inbox") : (node.path || node.name) }); },
-      function () { return node.parent_id ? I18n.t("ui.308d1fb0ab01") : I18n.t("ui.25c214d1a84b"); },
+    askConfirm(function () { return I18n.t("ui.780dfc4c1142"); }, [function () { return I18n.t("folder.delete_question", { name: node.path || node.name }); },
+      function () { return node.parent_id ? I18n.t("ui.308d1fb0ab01") : I18n.t("ui.00c3a1d3137a"); },
       function () { return I18n.t("ui.8abd5282befe"); }],
       { okText: I18n.t("ui.2f9daa828907"), danger: true }).then(function (ok) {
       if (!ok) return null;
@@ -386,12 +386,13 @@
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
   function renderFolderSelects() {
-    [["target-folder", true], ["rule-folder", false], ["move-folder", false]].forEach(function (pair) {
-      var sel = $(pair[0]); if (!sel) return;
+    // 两个下拉都留一个空值：不选子文件夹就等于"只在「全部论文」里"
+    ["target-folder", "move-folder"].forEach(function (id) {
+      var sel = $(id); if (!sel) return;
       var prev = sel.value; replaceChildren(sel);
-      if (pair[1]) sel.appendChild(el("option", { value: "", text: function () { return I18n.t("ui.464c0b9395bc"); } }));
+      sel.appendChild(el("option", { value: "", text: function () { return I18n.t("ui.6a557f0ca561"); } }));
       state.flatFolders.forEach(function (f) {
-        sel.appendChild(el("option", { value: String(f.id), text: function () { return "　".repeat(f.depth) + (f.system_kind === "inbox" ? I18n.t("system.inbox") : f.name); } }));
+        sel.appendChild(el("option", { value: String(f.id), text: function () { return "　".repeat(f.depth) + (f.name); } }));
       });
       if (prev) sel.value = prev;
     });
@@ -407,7 +408,7 @@
     bread.appendChild(el("button", { class: "mini", text: function () { return I18n.t("ui.c4fb397688ed"); }, onclick: function () { selectFolder(null); } }));
     path.forEach(function (part) {
       bread.appendChild(document.createTextNode(" / "));
-      bread.appendChild(el("button", { class: "mini", text: function () { return part.system_kind === "inbox" ? I18n.t("system.inbox") : part.name; }, title: part.path,
+      bread.appendChild(el("button", { class: "mini", text: function () { return part.name; }, title: part.path,
         onclick: function () { selectFolder(part.id); } }));
     });
     renderFolderTree(); loadPapers();
@@ -417,111 +418,12 @@
       [{ text: function () { return I18n.t("ui.4522f8325fde"); }, value: "root" }].concat(state.flatFolders.filter(function (f) {
         var item = state.folderMap[f.id];
         return f.id !== node.id && !(item.path || "").startsWith(node.path + "/");
-      }).map(function (f) { return { text: function () { return f.system_kind === "inbox" ? I18n.t("system.inbox") : state.folderMap[f.id].path; }, value: String(f.id) }; })))
+      }).map(function (f) { return { text: function () { return state.folderMap[f.id].path; }, value: String(f.id) }; })))
       .then(function (id) {
         if (id === null) return;
         return api.patch("/api/folders/" + node.id, { parent_id: id === "root" ? null : Number(id) })
           .then(loadFolders).then(function () { selectFolder(node.id); });
       }).catch(function (e) { toast(function () { return e.message; }, "err"); });
-  }
-
-  // ---------------- ArXiv 检索页（检索 Pipeline + 待读缓冲区） ----------------
-  var SEARCH_CATS = ["cs.CL", "cs.AI", "cs.LG", "cs.CV", "cs.NE", "stat.ML", "cs.RO", "cs.SE"];
-  var SEARCH_STAGES = [
-    { name: "search", get title() { return I18n.t("ui.085dd39d3615"); } },
-    { name: "screen", get title() { return I18n.t("ui.426ef335832a"); } },
-    { name: "summarize", get title() { return I18n.t("ui.c17b72ce6f86"); } },
-    { name: "buffer", get title() { return I18n.t("ui.ffc240e35e55"); } },
-  ];
-  var RUN_STATE = { get running() { return I18n.t("ui.1f0eb99b7ed0"); }, get done() { return I18n.t("ui.f28461bb49c8"); }, get failed() { return I18n.t("ui.28384d7afd2e"); },
-    get cancelled() { return I18n.t("ui.88cf2dc00c34"); }, get canceled() { return I18n.t("ui.88cf2dc00c34"); }, get stopped() { return I18n.t("ui.88cf2dc00c34"); } };
-  var searchTimer = null;
-  var searchRunId = null;
-  var searchPolls = 0;
-  var searchPolledRun = null;
-  var SEARCH_POLL_LIMIT = 900;        // 2s 一次 × 900 ≈ 30 分钟：服务端异常时也不让界面无限轮询
-
-  function initSearchCats() {
-    var box = $("s-cats");
-    if (!box || box.getAttribute("data-ready")) return;
-    box.setAttribute("data-ready", "1");
-    SEARCH_CATS.forEach(function (c) {
-      var cb = el("input", { type: "checkbox", value: c });
-      if (c === "cs.CL" || c === "cs.AI" || c === "cs.LG") cb.checked = true;
-      box.appendChild(el("label", { class: "cat" }, [cb, el("span", { text: c })]));
-    });
-    box.appendChild(el("input", { id: "s-cats-custom", type: "text", placeholder: function () { return I18n.t("ui.0ffbf4133d95"); } }));
-  }
-
-  var LS_SEARCH = "arxivreader.search.v1";
-
-  function openSearch() {
-    initSearchCats();
-    restoreSearchForm();
-    $("search-modal").classList.remove("hidden");
-    loadBuffer();
-    if (searchRunId) pollSearch(searchRunId, true);
-  }
-
-  // 检索表单持久化：能跨会话记住上次的检索条件（这类调研往往是连续几天的）
-  function saveSearchForm(body) {
-    try { ReaderPreferences.setItem(LS_SEARCH, JSON.stringify(body || collectSearchBody())); }
-    catch (e) { /* localStorage 不可用时静默降级 */ }
-  }
-
-  function restoreSearchForm() {
-    var saved = null;
-    try { saved = JSON.parse(ReaderPreferences.getItem(LS_SEARCH)); } catch (e) { saved = null; }
-    var today = new Date().toISOString().slice(0, 10);
-    if (!saved) { $("s-date-to").value = today; return; }
-    var cats = saved.categories || [];
-    document.querySelectorAll("#s-cats input[type=checkbox]").forEach(function (cb) {
-      cb.checked = cats.indexOf(cb.value) >= 0;
-    });
-    if ($("s-cats-custom"))
-      $("s-cats-custom").value = cats.filter(function (c) { return SEARCH_CATS.indexOf(c) < 0; }).join(", ");
-    $("s-keywords").value = (saved.keywords || []).join(", ");
-    $("s-kw-mode").value = saved.keyword_mode || "and";
-    $("s-date-from").value = saved.date_from || "";
-    $("s-date-to").value = saved.date_to || today;
-    if (saved.max_results) $("s-max").value = saved.max_results;
-    if (saved.min_score !== null && saved.min_score !== undefined) $("s-min-score").value = saved.min_score;
-    if (saved.max_summarize !== null && saved.max_summarize !== undefined) $("s-max-sum").value = saved.max_summarize;
-  }
-
-  function collectSearchBody() {
-    var cats = [];
-    document.querySelectorAll("#s-cats input[type=checkbox]:checked").forEach(function (cb) { cats.push(cb.value); });
-    var custom = ($("s-cats-custom") && $("s-cats-custom").value || "").split(/[,，\s]+/).filter(Boolean);
-    custom.forEach(function (c) { if (cats.indexOf(c) < 0) cats.push(c); });
-    var keywords = $("s-keywords").value.split(/[,，\s]+/).filter(Boolean);
-    return {
-      categories: cats, keywords: keywords,
-      date_from: $("s-date-from").value || null, date_to: $("s-date-to").value || null,
-      max_results: Number($("s-max").value || 40), sort_by: "submitted",
-      keyword_mode: $("s-kw-mode").value,
-      min_score: $("s-min-score").value === "" ? null : Number($("s-min-score").value),
-      max_summarize: $("s-max-sum").value === "" ? null : Number($("s-max-sum").value),
-    };
-  }
-
-  function startSearch() {
-    var body = collectSearchBody();
-    if (!body.categories.length && !body.keywords.length && !body.date_from) {
-      toast(function () { return I18n.t("ui.232d2e32f87d"); }, "err"); return;
-    }
-    saveSearchForm(body);
-    searchPolls = 0;
-    searchPolledRun = null;
-    $("s-run").disabled = true;
-    $("s-cancel").classList.remove("hidden");
-    $("s-progress").classList.remove("hidden");
-    replaceChildren($("s-logs"), el("div", { class: "log info", text: function () { return I18n.t("ui.daa71c039991"); } }));
-    api.post("/api/search/run", body).then(function (run) {
-      searchRunId = run.id;
-      renderSearchRun(run);
-      pollSearch(run.id, false);
-    }).catch(function (e) { toast(function () { return e.message; }, "err"); $("s-run").disabled = false; $("s-cancel").classList.add("hidden"); });
   }
 
   function stageDetail(logs, stage) {
@@ -551,273 +453,6 @@
       box.appendChild(line);
     });
     box.scrollTop = box.scrollHeight;
-  }
-
-  function renderSearchRun(run) {
-    var logs = run.logs || [];
-    // 兼容历史数据：stage 已 done 但 status 未写回的 run 视为已结束（否则界面永远停在“运行中”）
-    var effStatus = (run.status === "running" && run.stage === "done") ? "done" : run.status;
-    var box = $("s-stages"); replaceChildren(box);
-    SEARCH_STAGES.forEach(function (s) {
-      var done = (run.stages_done || []).indexOf(s.name) >= 0 || logs.some(function (l) { return l.stage === s.name && l.status === "done"; });
-      var running = !done && s.name === (run.stage || "") && effStatus === "running";
-      box.appendChild(el("div", { class: "stage " + (done ? "done" : (running ? "running" : "todo")) }, [
-        el("span", { class: "dot", text: done ? "✓" : (running ? "◐" : "○") }),
-        el("span", { class: "st", text: function () { return I18n.t("stage." + s.name); } }),
-        el("span", { class: "sd", text: function () { return stageDetail(logs, s.name); } }),
-      ]));
-    });
-    box.appendChild(el("div", { class: "stage " + (effStatus === "done" ? "done" : (effStatus === "running" ? "running" : "failed")) }, [
-      el("span", { class: "dot", text: effStatus === "done" ? "✓" : (effStatus === "running" ? "◐" : "■") }),
-      el("span", { class: "st", text: function () { return I18n.t("ui.9bf6abcc0b04") + statusLabel(effStatus)
-        + (run.cancel_requested && effStatus === "running" ? I18n.t("ui.d2a5e3de518f") : ""); } }),
-    ]));
-
-    var c = run.counters || {};
-    $("s-bar").style.width = (effStatus === "done" ? 100
-      : Math.min(97, Math.round(100 * ((c.screened || 0) + (c.summarized || 0)) / Math.max(1, 2 * (c.found || 1))))) + "%";
-    I18n.bind($("s-counters"), function () { return I18n.t("ui.036144607b66") + (c.found || 0) + I18n.t("ui.7dbf2207e6a3") + (c.duplicated || 0)
-      + I18n.t("ui.9449f69f0df0") + (c.passed || 0) + I18n.t("ui.d911aa8d7cc7") + (c.summarized || 0)
-      + I18n.t("ui.b07357fa4277") + (c.buffered || 0) + I18n.t("ui.d025c89a0f4b") + (c.dropped || 0)
-      + (run.error ? I18n.t("ui.b81306749e4d") + I18n.t("error.502") : ""); });
-
-    renderRunLogs($("s-logs"), logs);
-  }
-
-  function pollSearch(runId, silent) {
-    clearTimeout(searchTimer);
-    if (searchPolledRun !== runId) { searchPolledRun = runId; searchPolls = 0; }
-    api.get("/api/search/status?run_id=" + runId).then(function (run) {
-      renderSearchRun(run);
-      searchPolls += 1;
-      // stage 已 done 的 run 就算 status 还写着 running 也不再轮询（兼容历史数据）
-      var running = run.status === "running" && run.stage !== "done";
-      if (running && searchPolls < SEARCH_POLL_LIMIT) {
-        searchTimer = setTimeout(function () { pollSearch(runId, silent); }, 2000);
-        return;
-      }
-      $("s-run").disabled = false;
-      $("s-cancel").classList.add("hidden");
-      if (running) {
-        toast(function () { return I18n.t("ui.b0ce081ebc06"); }, "warn", 8000);
-        return;
-      }
-      loadBuffer();
-      var effStatus = (run.status === "running" && run.stage === "done") ? "done" : run.status;
-      if (!silent) {
-        toast(function () { return I18n.t("ui.aa0b63126c13") + (effStatus === "done" ? I18n.t("ui.c0b3fbff51cc") : (effStatus === "failed" ? I18n.t("ui.28384d7afd2e") : I18n.t("ui.f006455e3baf")))
-          + I18n.t("ui.1610ed07f57b") + ((run.counters || {}).found || 0) + I18n.t("ui.b07357fa4277")
-          + ((run.counters || {}).buffered || 0) + I18n.t("ui.78548675f31a")
-          + (run.error ? "（" + run.error + "）" : ""); },
-          effStatus === "done" ? "ok" : (effStatus === "failed" ? "err" : "warn"),
-          effStatus === "done" ? 3600 : 6000);
-      }
-    }).catch(function (e) { if (!silent) toast(function () { return e.message; }, "err"); });
-  }
-
-  function cancelSearch() {
-    if (!searchRunId) return;
-    api.post("/api/search/cancel?run_id=" + searchRunId).then(function () {
-      toast(function () { return I18n.t("ui.9ee2601e89e0"); }, "info");
-    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
-  }
-
-  function loadBuffer() {
-    var box = $("s-buffer");
-    if (box && !state.bufferReady) replaceChildren(box, skeleton("rows", 3));
-    return api.get("/api/buffer?status=pending&limit=200").then(function (data) {
-      var counts = data.counts || {};
-      I18n.bind($("s-buffer-counts"), function () { return I18n.t("ui.ecc264f1bbe6") + (counts.pending || 0) + I18n.t("ui.2d7e1bf61a4d")
-        + (counts.read || 0) + I18n.t("ui.2dd8d6698f6e") + (counts.rejected || 0); });
-      state.bufferReady = true;
-      renderBuffer(data.items || []);
-    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
-  }
-
-  // 批量选择：bufferItems 是当前渲染条目的快照（批量操作只针对它统计可选集合）；
-  // bufferSelected 是勾选集合（id -> true），重新加载列表时清空。
-  var bufferItems = [];
-  var bufferSelected = {};
-
-  function updateBatchBar() {
-    var bar = $("s-batch-bar");
-    if (!bar) return;
-    var selectable = bufferItems.filter(function (it) { return it.selectable; });
-    var picked = selectable.filter(function (it) { return bufferSelected[it.id]; }).length;
-    bar.classList.toggle("hidden", !selectable.length);
-    var selAll = $("s-select-all");
-    if (selAll) {
-      selAll.disabled = !selectable.length;
-      selAll.checked = selectable.length > 0 && picked === selectable.length;
-      selAll.indeterminate = picked > 0 && picked < selectable.length;
-    }
-    var btn = $("s-batch-reject");
-    if (btn) {
-      btn.disabled = picked === 0;
-      I18n.bind(btn, function () { return picked ? I18n.t("ui.164735485c19") + picked + "）" : I18n.t("ui.29670536129f"); });
-    }
-    var hint = $("s-batch-hint");
-    if (hint) I18n.bind(hint, function () { return picked ? I18n.t("ui.52c963128eab") + picked + I18n.t("ui.78548675f31a") : I18n.t("ui.f4394c85673a"); });
-  }
-
-  function toggleSelectAllBuffer(on) {
-    bufferItems.forEach(function (it) {
-      if (!it.selectable) return;
-      if (on) bufferSelected[it.id] = true;
-      else delete bufferSelected[it.id];
-    });
-    document.querySelectorAll("#s-buffer .b-pick input").forEach(function (cb) {
-      var it = bufferItems.filter(function (x) { return x.id === Number(cb.getAttribute("data-id")); })[0];
-      cb.checked = !!(on && it && it.selectable);
-    });
-    updateBatchBar();
-  }
-
-  function rejectSelectedBuffer() {
-    var ids = bufferItems
-      .filter(function (it) { return it.selectable && bufferSelected[it.id]; })
-      .map(function (it) { return it.id; });
-    if (!ids.length) { toast(function () { return I18n.t("ui.25f2e796ed2d"); }, "warn"); return; }
-    askConfirm(function () { return I18n.t("ui.29670536129f"); }, [
-      function () { return I18n.t("ui.9e3a984bce95") + ids.length + I18n.t("ui.1f047aa560fc"); },
-      function () { return I18n.t("ui.51bb48599faa"); },
-    ], { okText: I18n.t("ui.b16f71b55691"), danger: true }).then(function (ok) {
-      if (!ok) return null;
-      return api.post("/api/buffer/reject-batch", { ids: ids }).then(function (res) {
-        var skipped = (res.skipped_ids || []).length;
-        toast(function () { return I18n.t("ui.d96da28b1618") + (res.rejected || 0) + I18n.t("ui.78548675f31a") + (skipped ? I18n.t("ui.af3c221a116e") + skipped + I18n.t("ui.78548675f31a") : ""); },
-          res.rejected ? "ok" : "warn");
-        return loadBuffer();
-      }).catch(function (e) { toast(function () { return e.message; }, "err"); });
-    });
-  }
-
-  function renderBuffer(items) {
-    var box = $("s-buffer"); replaceChildren(box);
-    bufferItems = []; bufferSelected = {};
-    if (!items.length) {
-      box.appendChild(emptyState("📥", function () { return I18n.t("ui.a91dc7dda4e8"); },
-        function () { return I18n.t("ui.4cb1b4b58220"); }));
-      updateBatchBar();
-      return;
-    }
-    items.forEach(function (b) {
-      var verified = !!b.summary_text;
-      var selectable = !b.promote_state;      // 提升入库中的条目不可批量丢弃
-      bufferItems.push({ id: b.id, selectable: selectable });
-      var ops = el("div", { class: "b-ops" }, [
-        el("button", { class: "mini", text: function () { return I18n.t("ui.13d61fea9f17"); }, onclick: function () { previewBuffer(b, row); } }),
-      ]);
-      if (!verified) {
-        ops.appendChild(el("button", {
-          class: "mini", title: function () { return I18n.t("ui.4a8a84c10769"); },
-          text: function () { return I18n.t("ui.62c042c0c494"); },
-          onclick: function (ev) { summarizeBuffer(b, ev.target); },
-        }));
-      }
-      ops.appendChild(el("button", { class: "mini primary", text: function () { return I18n.t("ui.396530b08ab5"); }, onclick: function () { promoteBuffer(b, row); } }));
-      ops.appendChild(el("button", { class: "mini danger", text: function () { return I18n.t("ui.b16f71b55691"); }, onclick: function () { rejectBuffer(b, row); } }));
-
-      var pickWrap;
-      if (selectable) {
-        var pick = el("input", { type: "checkbox", "data-id": String(b.id) });
-        pick.checked = !!bufferSelected[b.id];
-        pick.addEventListener("change", function () {
-          if (pick.checked) bufferSelected[b.id] = true;
-          else delete bufferSelected[b.id];
-          updateBatchBar();
-        });
-        pickWrap = el("label", { class: "b-pick", title: function () { return I18n.t("ui.44f5b1b6598d"); } }, [pick]);
-      } else {
-        pickWrap = el("span", { class: "b-pick busy", title: function () { return I18n.t("ui.5b6b025cb0b0"); }, text: "⏳" });
-      }
-
-      var row = el("div", { class: "buffer-item" }, [
-        el("div", { class: "b-head" }, [
-          pickWrap,
-          el("span", { class: "b-title", text: b.title || b.arxiv_id }),
-          el("span", { class: "b-score", text: (b.match_score || 0).toFixed(2) }),
-        ]),
-        el("div", { class: "b-meta", text: [(b.authors || []).slice(0, 3).join(", "),
-          (b.published || "").slice(0, 10), b.arxiv_id].filter(Boolean).join(" · ") }),
-        el("div", { class: "b-badges" }, [
-          el("span", { class: "b-chip" + (verified ? " ok" : " warn"),
-            text: function () { return verified ? I18n.t("ui.77cc7fbb5f5d") : I18n.t("ui.8245f0ab274b"); } }),
-          el("span", { class: "b-chip path", text: function () { return b.verified_path || b.suggested_path || I18n.t("ui.92be9f13c41f"); } }),
-        ]),
-        el("div", { class: "b-reason", text: b.verify_reason || b.screen_reason || "" }),
-        ops,
-        el("div", { class: "b-detail hidden" }),
-      ]);
-      box.appendChild(row);
-    });
-    updateBatchBar();
-  }
-
-  function summarizeBuffer(b, btn) {
-    btn.disabled = true;
-    I18n.bind(btn, function () { return I18n.t("ui.e7e21d6b6951"); });
-    api.post("/api/buffer/" + b.id + "/summarize", {}).then(function () {
-      toast(function () { return I18n.t("ui.944a544eb929"); }, "ok");
-      loadBuffer();
-    }).catch(function (e) {
-      toast(function () { return I18n.t("ui.3779ec5d5a96") + e.message; }, "err");
-      btn.disabled = false; I18n.bind(btn, function () { return I18n.t("ui.62c042c0c494"); });
-    });
-  }
-
-  function previewBuffer(b, row) {
-    var detail = row.querySelector(".b-detail");
-    if (!detail.classList.contains("hidden")) { detail.classList.add("hidden"); return; }
-    api.get("/api/buffer/" + b.id).then(function (full) {
-      replaceChildren(detail);
-      detail.appendChild(el("div", { class: "b-sec", text: function () { return I18n.t("ui.21c04b2eeeb4"); } }));
-      detail.appendChild(el("div", { class: "b-text", text: function () { return full.abstract || I18n.t("ui.c7bcc6d27f3a"); } }));
-      detail.appendChild(el("div", { class: "b-sec", text: function () { return I18n.t("ui.2d97cc22a742"); } }));
-      var md = el("div", { class: "md" });
-      setMd(md, full.summary_text || I18n.t("ui.f1fa19eac425"));
-      detail.appendChild(md);
-      detail.appendChild(el("div", { class: "b-sec", text: function () { return I18n.t("ui.3c1ba320274e"); } }));
-      detail.appendChild(el("div", { class: "b-text", text: full.verify_reason || "—" }));
-      detail.classList.remove("hidden");
-    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
-  }
-
-  function promoteBuffer(b, row) {
-    askConfirm(function () { return I18n.t("ui.396530b08ab5"); }, [
-      shortText(b.title || b.arxiv_id, 46),
-      function () { return I18n.t("ui.78251168cefc"); },
-      function () { return I18n.t("ui.3804b9c9b49c"); },
-    ], { okText: I18n.t("ui.66b2dbc6cbdc") }).then(function (ok) {
-      if (!ok) return null;
-      var badge = el("span", { class: "b-state", text: function () { return I18n.t("ui.f938cc565569"); } });
-      row.querySelector(".b-ops").appendChild(badge);
-      return api.post("/api/buffer/" + b.id + "/promote?background=true&trigger_pipeline=true", {}).then(function () {
-        var timer = setInterval(function () {
-          api.get("/api/buffer/" + b.id).then(function (full) {
-            if (full.promote_state === "running" || full.promote_state === "queued") {
-              I18n.bind(badge, function () { return full.promote_state === "running" ? I18n.t("ui.d3f9bc7c59aa") : I18n.t("ui.f938cc565569"); });
-              return;
-            }
-            clearInterval(timer);
-            if (full.promote_state === "done") {
-              I18n.bind(badge, function () { return I18n.t("ui.150f4279f53b"); });
-              toast(function () { return I18n.t("ui.ea6750b944fe"); }, "ok");
-              loadFolders(); loadPapers(); loadBuffer();
-            } else {
-              I18n.bind(badge, function () { return I18n.t("ui.28384d7afd2e"); });
-              toast(function () { return I18n.t("ui.0b7955374c21") + (full.promote_error || I18n.t("ui.13a46616e16f")); }, "err");
-            }
-          }).catch(function () { /* 轮询失败就下次再试 */ });
-        }, 3000);
-      }).catch(function (e) { badge.remove(); toast(function () { return e.message; }, "err"); });
-    });
-  }
-
-  function rejectBuffer(b, row) {
-    api.post("/api/buffer/" + b.id + "/reject", {}).then(function () {
-      row.remove(); loadBuffer(); toast(function () { return I18n.t("ui.ba23cebddcfc"); }, "info");
-    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
 
   // ---------------- 智能关联检索（Related Work 关联发现） ----------------
@@ -885,12 +520,12 @@
 
     var c = (run && run.counters) || {};
     $("r-bar").style.width = (effStatus === "done" ? 100
-      : Math.min(96, Math.round(100 * ((c.summarized || 0) + (c.strong || 0) + (c.related || 0) + (c.uncertain || 0) + (c.unrelated || 0))
+      : Math.min(96, Math.round(100 * ((c.strong || 0) + (c.related || 0) + (c.uncertain || 0) + (c.unrelated || 0))
           / Math.max(1, 2 * (c.selected || 1))))) + "%";
     I18n.bind($("r-counters"), function () {
-    var counterLabels = [["seeds", I18n.t("ui.fbbf1f51ea4a"), "References"], ["queries", I18n.t("ui.6e02610c0cad"), "Topic queries"],
+    var counterLabels = [["seeds", I18n.t("ui.fbbf1f51ea4a"), "Citation titles"],
       ["found", I18n.t("ui.393df9bb13ea"), "Found"], ["duplicated", I18n.t("ui.1bd91a7d0c53"), "Already saved"], ["selected", I18n.t("ui.a4f1d1644ce6"), "Selected"],
-      ["summarized", I18n.t("ui.0b3f90e2d9b9"), "Summarized"], ["strong", I18n.t("ui.52ec36274dee"), "Highly related"], ["related", I18n.t("ui.7dfa43a32757"), "Related"],
+      ["strong", I18n.t("ui.52ec36274dee"), "Highly related"], ["related", I18n.t("ui.7dfa43a32757"), "Related"],
       ["uncertain", I18n.t("ui.ccf9206892f8"), "Uncertain"], ["unrelated", I18n.t("ui.d3892c577fc7"), "Unrelated"], ["remaining", I18n.t("ui.b5e75830ac4f"), "Remaining"],
       ["failed", I18n.t("ui.9a0392d0d436"), "Candidate failures"], ["search_failed", I18n.t("ui.bf4cedf76a4e"), "Query failures"], ["extraction_failed", I18n.t("ui.a1d66d5b150e"), "Extraction failures"]];
     return run ? counterLabels.map(function (entry) {
@@ -941,7 +576,6 @@
       } }));
       if (c.processing_error) badges.appendChild(el("span", { class: "b-chip warn", text: c.processing_error }));
       if (c.in_library) badges.appendChild(el("span", { class: "b-chip path", text: function () { return I18n.t("ui.c18f5840e535"); } }));
-      else if (c.in_buffer) badges.appendChild(el("span", { class: "b-chip warn", text: function () { return I18n.t("ui.a3311364c3a8"); } }));
       if (promoted) badges.appendChild(el("span", { class: "b-chip ok", text: function () { return I18n.t("ui.47c8c2e7cd40"); } }));
       if (c.promote_state === "running" || c.promote_state === "queued") {
         badges.appendChild(el("span", { class: "b-chip warn", text: function () { return I18n.t("ui.694b71bc8013"); } }));
@@ -1096,28 +730,80 @@
   }
 
   // ---------------- 方向节点论文图谱（md + 无依赖 SVG） ----------------
-  var currentGraphNodeId = null, currentGraph = null, graphZoom = 1, graphRequest = 0;
   var REL_LABEL = { get cites() { return I18n.t("ui.e0ec651f0dae"); }, get extends() { return I18n.t("ui.99a4e1e59743"); }, get improves() { return I18n.t("ui.c5d3067c551f"); }, get contradicts() { return I18n.t("ui.a86d29234503"); },
     get complements() { return I18n.t("ui.1cfecdce14e8"); }, get applies() { return I18n.t("ui.63c73c4730f4"); }, get baseline_of() { return I18n.t("ui.a7ac587ab52d"); }, get uses() { return I18n.t("ui.cdfd0b34e491"); } };
 
+  var currentGraphNodeId = null, currentGraph = null, graphZoom = 1, graphRequest = 0;
+  var graphScope = null;          // {kind:"node"|"paper", id}
+
   function showNodeGraph(nodeId) {
     currentGraphNodeId = nodeId;
-    hidePdfViewer();
+    graphScope = { kind: "node", id: nodeId };
+    hideReader();
     $("viewer-empty").classList.add("hidden");
-    $("viewer-toolbar").classList.add("hidden");
+    $("viewer-toolbar").classList.remove("hidden");
     $("graph-view").classList.remove("hidden");
     loadNodeGraph(nodeId);
   }
 
+  /** 单篇论文的关系图谱：以这篇论文为中心的邻域，数据来自 /api/papers/{id}/knowledge。 */
+  function showPaperGraph(paper) {
+    currentGraphNodeId = null;
+    graphScope = { kind: "paper", id: paper.id };
+    hideReader();
+    $("viewer-empty").classList.add("hidden");
+    $("viewer-toolbar").classList.remove("hidden");
+    $("graph-view").classList.remove("hidden");
+    var request = ++graphRequest;
+    replaceChildren($("graph-svg-box"), skeleton("graph", 2));
+    replaceChildren($("graph-papers"));
+    I18n.bind($("graph-path"), function () { return "🕸 " + shortText(paper.title || paper.arxiv_id, 60); });
+    api.get("/api/papers/" + paper.id + "/knowledge").then(function (payload) {
+      if (request !== graphRequest || !payload) return;
+      currentGraph = paperGraph(payload, paper);
+      I18n.bind($("graph-meta"), function () {
+        return currentGraph.edges.length
+          ? I18n.t("ui.253aaff19a39") + " " + currentGraph.edges.length
+          : I18n.t("ui.c06dea6ab401");
+      });
+      fillRelationSelectors();
+      renderRelations();
+    }).catch(function (e) {
+      if (request !== graphRequest) return;
+      replaceChildren($("graph-svg-box"), emptyState("🕸", function () { return I18n.t("ui.76921e19cac7"); },
+        function () { return e.message; }));
+    });
+  }
+
+  /** 把"论文 → 其它论文"的边补成带标题的节点集合（后端已回传端点标题）。 */
+  function paperGraph(payload, paper) {
+    var nodes = {}, order = [];
+    function put(id, label, arxivId, year, role) {
+      if (!nodes[id]) { nodes[id] = { id: id, label: label || ("#" + id), arxiv_id: arxivId || "", year: year || "", role: role || "" }; order.push(nodes[id]); }
+      return nodes[id];
+    }
+    put(paper.id, paper.title || paper.arxiv_id, paper.arxiv_id, (paper.published || "").slice(0, 4), "primary");
+    var edges = (payload.edges || []).map(function (edge) {
+      put(edge.source, edge.source_title, edge.source_arxiv_id, "");
+      put(edge.target, edge.target_title, edge.target_arxiv_id, "");
+      return { id: edge.id, source: edge.source, target: edge.target, relation: edge.relation,
+               direction: edge.direction, strength: edge.strength, rationale: edge.rationale,
+               evidence: edge.evidence, output_language: edge.output_language };
+    });
+    return { nodes: order, edges: edges };
+  }
+
   function hideNodeGraph() {
     currentGraphNodeId = null;
+    graphScope = null;
+    graphRequest++;
     $("graph-view").classList.add("hidden");
     // 关掉图谱后既没有图谱也没有 PDF 时，把空态露出来（否则预览区留白）
-    if (!pdfvVisible()) $("viewer-empty").classList.remove("hidden");
+    if (!readerVisible()) $("viewer-empty").classList.remove("hidden");
   }
 
   function showViewerEmpty() {
-    hidePdfViewer();
+    hideReader();
     $("viewer-toolbar").classList.add("hidden");
     $("graph-view").classList.add("hidden");
     $("viewer-empty").classList.remove("hidden");
@@ -1126,6 +812,9 @@
   // 图谱关掉后回到上一状态：选中的论文还在就回到 PDF，否则回到空态
   function restoreViewerAfterGraph() {
     currentGraphNodeId = null;
+    graphScope = null;
+    graphRequest++;
+    $("graph-view").classList.add("hidden");
     if (state.currentPaper) selectPaper(state.currentPaper);
     else showViewerEmpty();
   }
@@ -1135,78 +824,65 @@
     function current() { return currentGraphNodeId === nodeId && request === graphRequest; }
     replaceChildren($("graph-svg-box"), skeleton("graph", 2));
     replaceChildren($("graph-papers"));
-    $("graph-legend").classList.add("hidden");
-    hidePdfViewer();
-    $("viewer-empty").classList.add("hidden");
-    $("viewer-toolbar").classList.add("hidden");
-    $("graph-view").classList.remove("hidden");
-    $("graph-del").disabled = false;
-
     api.get("/api/knowledge/nodes/" + nodeId).then(function (payload) {
-      var node = payload.node || {}, graph = payload.graph || {};
-      if (!current()) return;
-      I18n.write($("graph-path"), node.path || "");
-      I18n.bind($("graph-meta"), function () { return [
-        I18n.t("ui.6f849c07cdc5") + (node.paper_count || 0) + I18n.t("ui.1ccafea91530") + (node.subtree_paper_count || 0) + ")",
-        I18n.t("ui.ed2c4e1c9c3b") + ((graph.edges || []).length),
-        node.has_synthesis ? I18n.t("ui.c95eb164d78d") : I18n.t("ui.3f7bcb58e72e"),
-        node.graph_md_path || I18n.t("ui.c653d6ed261a"),
-      ].join("　·　"); });
+      if (!current() || !payload) return;
+      var node = payload.node || {}, graph = payload.graph || { nodes: [], edges: [] };
       currentGraph = graph;
-      var relationSelect = $("relation-filter"), paperSelect = $("relation-paper");
-      replaceChildren(relationSelect, el("option", { value: "", text: function () { return I18n.t("ui.11c63c4d0d1c"); } }));
-      Object.keys(REL_LABEL).forEach(function (key) { relationSelect.appendChild(el("option", { value: key, text: function () { return relationLabel(key); } })); });
-      replaceChildren(paperSelect, el("option", { value: "", text: function () { return I18n.t("ui.c4fb397688ed"); } }));
-      (graph.nodes || []).forEach(function (p) { paperSelect.appendChild(el("option", { value: p.id, text: p.label })); });
-      renderRelations();
-      renderGraphLegend(graph);
-      renderGraphPapers(payload.papers || []);
+      I18n.write($("graph-path"), node.path || node.name);
       $("graph-md-link").setAttribute("href", "/reader.html?node=" + nodeId);
-    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
-
-    fetch("/api/knowledge/nodes/" + nodeId + "/graph.md")
-      .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
-      .then(function (text) { if (current()) setMd($("graph-md"), text); })
-      .catch(function () { if (current()) setMd($("graph-md"), I18n.t("ui.754fab2afca4")); });
+      I18n.bind($("graph-meta"), function () {
+        var bits = [I18n.t("ui.6f849c07cdc5") + (node.paper_count || 0) + I18n.t("ui.1ccafea91530")
+          + (node.subtree_paper_count || 0) + ")", I18n.t("ui.ed2c4e1c9c3b") + (graph.edges || []).length];
+        if (node.has_synthesis) bits.push(I18n.t("ui.c95eb164d78d") + (node.synthesis_paper_count || 0) + I18n.t("ui.3f7bcb58e72e"));
+        return bits.join(" · ");
+      });
+      fillRelationSelectors();
+      renderGraphPapers(payload.papers || []);
+      renderRelations();
+    }).catch(function (e) {
+      if (!current()) return;
+      replaceChildren($("graph-svg-box"), emptyState("🕸", function () { return I18n.t("ui.76921e19cac7"); },
+        function () { return e.message; }));
+    });
   }
 
-  // 关系图例：把边上出现的 relation 与节点归属颜色讲清楚（否则圆和线看不懂）
+  function fillRelationSelectors() {
+    var graph = currentGraph || { nodes: [], edges: [] };
+    var kinds = {};
+    (graph.edges || []).forEach(function (edge) { kinds[relationLabel(edge.relation)] = 1; });
+    replaceChildren.apply(null, [$("relation-filter"), el("option", { value: "", text: function () { return I18n.t("ui.11c63c4d0d1c"); } })]
+      .concat(Object.keys(kinds).sort().map(function (label) { return el("option", { text: label }); })));
+    var papers = $("relation-paper");
+    replaceChildren.apply(null, [papers, el("option", { value: "", text: function () { return I18n.t("ui.c4fb397688ed"); } })]
+      .concat((graph.nodes || []).map(function (p) { return el("option", { value: String(p.id), text: shortText(p.label || "", 46) }); })));
+  }
+
   function renderGraphLegend(graph) {
     var box = $("graph-legend");
-    var kinds = {};
-    (graph.edges || []).forEach(function (e) { kinds[e.relation] = (kinds[e.relation] || 0) + 1; });
-    var keys = Object.keys(kinds);
-    replaceChildren(box);
-    if (keys.length) {
-      box.appendChild(el("span", { class: "lg-title", text: function () { return I18n.t("ui.253aaff19a39"); } }));
-      keys.forEach(function (k) {
-        box.appendChild(el("span", { class: "lg-item" }, [
-          el("span", { class: "lg-line" }),
-          el("span", { text: function () { return relationLabel(k) + "　" + kinds[k]; } }),
-        ]));
-      });
-    }
-    box.appendChild(el("span", { class: "lg-title", text: function () { return I18n.t("ui.71db87be72ae"); } }));
-    box.classList.remove("hidden");
+    var kinds = {}, order = [];
+    (graph.edges || []).forEach(function (edge) {
+      var label = relationLabel(edge.relation);
+      if (!kinds[label]) { kinds[label] = 0; order.push(label); }
+      kinds[label] += 1;
+    });
+    replaceChildren.apply(null, [box].concat(order.sort().map(function (label) {
+      return el("span", { class: "lg-item" }, [el("i", { class: "lg-line" }), el("span", { text: label + " " + kinds[label] })]);
+    })));
   }
 
-  // 图谱下方的论文卡片：图看不清标题时，从卡片直接打开 PDF
   function renderGraphPapers(papers) {
     var box = $("graph-papers");
-    replaceChildren(box);
-    if (!papers.length) return;
-    box.appendChild(el("div", { class: "gp-title", text: function () { return I18n.t("ui.665286f9f6fd"); } }));
+    replaceChildren(box, el("div", { class: "gp-title", text: function () { return I18n.t("ui.665286f9f6fd"); } }));
+    if (!papers.length) {
+      box.appendChild(el("div", { class: "hint", text: function () { return I18n.t("ui.b837705aa6e9"); } }));
+      return;
+    }
     var grid = el("div", { class: "gp-grid" });
     papers.forEach(function (p) {
-      var card = el("div", {
-        class: "gp-card",
-        title: p.reason || "",
-      }, [
-        el("div", { class: "gp-name", text: p.title || p.arxiv_id }),
-        el("div", { class: "gp-meta", text: function () {
-          var pid = (p.arxiv_id || "").indexOf("local-") === 0 ? I18n.t("ui.4d8e2b7ca915") : p.arxiv_id;
-          return [pid, (p.added_at || "").slice(0, 10)].filter(Boolean).join(" · ");
-        } }),
+      var card = el("button", { class: "gp-card" + (state.currentPaper && state.currentPaper.id === p.id ? " active" : ""),
+        title: p.title || p.arxiv_id }, [
+        el("span", { class: "gp-t", text: shortText(p.title || p.arxiv_id, 90) }),
+        el("span", { class: "gp-m", text: (p.arxiv_id || "") + (p.role ? " · " + p.role : "") }),
       ]);
       card.addEventListener("click", function () { openPaperById(p.id); });
       grid.appendChild(card);
@@ -1215,96 +891,215 @@
   }
 
   function openPaperById(paperId) {
-    api.get("/api/papers/" + paperId).then(function (p) {
-      selectPaper(p);
-      toast(function () { return I18n.t("ui.1986b8015ddf") + shortText(p.title || p.arxiv_id, 30); });
-    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+    var p = state.papers.find(function (x) { return x.id === paperId; });
+    if (!p) { toast(function () { return I18n.t("ui.150f4279f53b"); }, "warn"); return; }
+    if (state.currentPaper && state.currentPaper.id === p.id) { restoreViewerAfterGraph(); return; }
+    selectPaper(p);
   }
 
-  // 删除当前方向节点（图谱视图里的入口）：论文保留，子方向上移一层
   function deleteCurrentGraphNode() {
     if (!currentGraphNodeId) return;
-    var path = ($("graph-path").textContent || "").replace("🧭 ", "").trim();
-    var nodeId = currentGraphNodeId;
+    var node = ((state.folderMap || {})[currentGraphNodeId] || {});
+    var path = ($("graph-path").textContent || "").trim();
     askConfirm(function () { return I18n.t("ui.079207a7b410"); }, [
       function () { return I18n.t("ui.9fad3beb4471") + path + "」？"; },
       function () { return I18n.t("ui.926a6e7bc677"); },
-    ], { okText: I18n.t("ui.2f9daa828907"), danger: true }).then(function (ok) {
+    ], { okText: function () { return I18n.t("ui.2f9daa828907"); }, danger: true }).then(function (ok) {
       if (!ok) return null;
-      $("graph-del").disabled = true;
-      return api.del("/api/knowledge/nodes/" + nodeId).then(function () {
-        toast(function () { return I18n.t("ui.14f80dfb3d98") + path + "」"; }, "ok");
-        if (currentGraphNodeId === nodeId) restoreViewerAfterGraph();
-        return loadFolders();
-      }).then(loadPapers).catch(function (e) {
-        toast(function () { return e.message; }, "err");
-        $("graph-del").disabled = false;
-      });
+      return api.del("/api/knowledge/nodes/" + currentGraphNodeId).then(function () {
+        restoreViewerAfterGraph();
+        toast(function () { return I18n.t("ui.14f80dfb3d98"); }, "ok");
+        loadFolders();
+      }).catch(function (e) { toast(function () { return e.message; }, "err"); });
     });
   }
 
   function relationLabel(value) {
-    var en = { cites: "Cites", extends: "Extends", improves: "Improves", contradicts: "Contradicts", complements: "Complements", applies: "Applies", baseline_of: "Baseline of", uses: "Uses" };
-    return (state.outputLanguage === "en" ? en : REL_LABEL)[value] || I18n.t("ui.4e7796b47148");
+    return REL_LABEL[value] || value || I18n.t("ui.4e7796b47148");
   }
-  function renderRelations() {
-    if (!currentGraph) return;
-    var graph = currentGraph, byId = {}, filter = $("relation-filter").value, focus = Number($("relation-paper").value);
-    (graph.nodes || []).forEach(function (p) { byId[p.id] = p; });
-    var edges = (graph.edges || []).filter(function (edge) {
-      return (!filter || edge.relation === filter) && (!focus || edge.source === focus || edge.target === focus);
+
+  // ---------------------------------------------------------------- 关系流程图
+  var GRAPH_NODE_W = 208, GRAPH_NODE_H = 62, GRAPH_COL_GAP = 108, GRAPH_ROW_GAP = 24;
+
+  /** 分层布局：最长路径定层 + 一次重心排序减少交叉；有环时把剩余节点接在最深一层之后。 */
+  function graphLayout(nodes, edges) {
+    var rank = {}, incoming = {}, outgoing = {};
+    nodes.forEach(function (n) { rank[n.id] = 0; incoming[n.id] = []; outgoing[n.id] = []; });
+    edges.forEach(function (e) {
+      if (!(e.source in rank) || !(e.target in rank) || e.source === e.target) return;
+      outgoing[e.source].push(e.target);
+      incoming[e.target].push(e.source);
     });
-    var box = $("relation-cards"); replaceChildren(box);
-    if (!edges.length) box.appendChild(el("p", { class: "hint", text: function () { return I18n.t("ui.c06dea6ab401"); } }));
-    edges.forEach(function (edge) {
-      var source = byId[edge.source], target = byId[edge.target];
-      if (!source || !target) return;
-      var card = el("section", { class: "relation-card" });
-      card.appendChild(el("div", { class: "relation-title" }, [
-        el("button", { class: "mini", text: source.label, onclick: function () { openPaperById(source.id); } }),
-        el("strong", { text: function () { return " → " + relationLabel(edge.relation) + " → "; } }),
-        el("button", { class: "mini", text: target.label, onclick: function () { openPaperById(target.id); } })]));
-      var translated = edge.translation && edge.translation.output_language === state.outputLanguage;
-      var rationale = el("div"); setMd(rationale, translated ? edge.translation.content_md : edge.rationale || ""); card.appendChild(rationale);
-      var original = el("details"), originalBody = el("div");
-      original.appendChild(el("summary", { text: function () { return I18n.t("ui.43ead8d80d9e"); } }));
-      setMd(originalBody, (edge.rationale || "") + "\n\n" + (edge.evidence || "")); original.appendChild(originalBody);
-      if (translated) card.appendChild(original);
-      else if (edge.evidence) { var evidence = el("blockquote"); setMd(evidence, edge.evidence); card.appendChild(evidence); }
-      card.appendChild(el("div", { class: "hint", text: function () { return translated ? I18n.t("ui.13160f00f68e") : languageNotice(edge.output_language); } }));
-      if (!translated && edge.output_language !== state.outputLanguage) card.appendChild(el("button", { class: "mini", text: function () { return I18n.t("ui.69aab5c61455"); }, onclick: function () {
-        api.post("/api/translations/relation/" + edge.id).then(function (data) { edge.translation = data; renderRelations(); }).catch(function (e) { toast(function () { return e.message; }, "err"); });
-      } }));
-      box.appendChild(card);
-    });
-    var ns = "http://www.w3.org/2000/svg";
-    function svgEl(name, attrs, text) {
-      var element = document.createElementNS(ns, name);
-      Object.keys(attrs || {}).forEach(function (key) { element.setAttribute(key, attrs[key]); });
-      if (text) I18n.write(element, text); return element;
+    var queue = nodes.map(function (n) { return n.id; }).filter(function (id) { return !incoming[id].length; });
+    var seen = {}, guard = 0;
+    while (queue.length && guard++ < 20000) {
+      var id = queue.shift();
+      if (seen[id]) continue;
+      seen[id] = true;
+      outgoing[id].forEach(function (next) {
+        rank[next] = Math.max(rank[next], rank[id] + 1);
+        if (incoming[next].every(function (src) { return seen[src]; })) queue.push(next);
+      });
     }
-    var height = Math.max(180, Math.ceil((graph.nodes || []).length / 2) * 130 + 40);
-    var svg = svgEl("svg", { viewBox: "0 0 660 " + height, width: 660 * graphZoom, height: height * graphZoom, class: "graph-svg" });
-    var positions = {};
-    (graph.nodes || []).forEach(function (p, i) { positions[p.id] = { x: 30 + (i % 2) * 330, y: 24 + Math.floor(i / 2) * 130 }; });
-    edges.forEach(function (edge) {
-      var a = positions[edge.source], b = positions[edge.target]; if (!a || !b) return;
-      var line = svgEl("path", { d: "M" + (a.x + 130) + " " + (a.y + 36) + " L" + (b.x + 130) + " " + (b.y + 36), class: "relation-edge" + (focus ? " active" : "") });
-      line.appendChild(svgEl("title", {}, relationLabel(edge.relation) + ": " + edge.rationale)); svg.appendChild(line);
+    nodes.forEach(function (n) { if (!seen[n.id]) rank[n.id] = Math.max.apply(null, [1].concat(nodes.map(function (m) { return rank[m.id]; }))); });
+    var columns = [];
+    nodes.forEach(function (n) { (columns[rank[n.id]] || (columns[rank[n.id]] = [])).push(n); });
+    for (var c = 1; c < columns.length; c++) {
+      if (!columns[c]) continue;
+      columns[c].sort(function (a, b) {
+        function bary(node) {
+          var src = incoming[node.id].filter(function (s) { return rank[s] < rank[node.id]; });
+          if (!src.length) return 9999;
+          var col = columns[rank[node.id] - 1] || [];
+          return col.reduce(function (sum, item, index) {
+            return sum + (src.indexOf(item.id) >= 0 ? index : 0);
+          }, 0) / src.length;
+        }
+        return bary(a) - bary(b);
+      });
+    }
+    var positions = {}, width = 0, height = 0;
+    columns.forEach(function (column, index) {
+      if (!column) return;
+      column.forEach(function (node, row) {
+        positions[node.id] = { x: 24 + index * (GRAPH_NODE_W + GRAPH_COL_GAP), y: 24 + row * (GRAPH_NODE_H + GRAPH_ROW_GAP) };
+        width = Math.max(width, positions[node.id].x + GRAPH_NODE_W + 24);
+        height = Math.max(height, positions[node.id].y + GRAPH_NODE_H + 24);
+      });
     });
-    (graph.nodes || []).forEach(function (p) {
-      var pos = positions[p.id], group = svgEl("g", { class: "relation-node" + (p.id === focus ? " selected" : ""), tabindex: "0", role: "button" });
-      group.appendChild(svgEl("rect", { x: pos.x, y: pos.y, width: 265, height: 76, rx: 9 }));
-      group.appendChild(svgEl("title", {}, p.label));
-      group.appendChild(svgEl("text", { x: pos.x + 12, y: pos.y + 24 }, shortText(p.label || "", 32)));
-      group.appendChild(svgEl("text", { x: pos.x + 12, y: pos.y + 46 }, shortText((p.label || "").slice(31), 32)));
-      group.appendChild(svgEl("text", { x: pos.x + 12, y: pos.y + 64 }, p.year || ""));
-      function select() { $("relation-paper").value = String(p.id); renderRelations(); }
-      group.addEventListener("click", select); group.addEventListener("keydown", function (e) { if (e.key === "Enter") select(); });
-      svg.appendChild(group);
-    });
-    replaceChildren($("graph-svg-box"), svg);
+    return { positions: positions, width: Math.max(width, 320), height: Math.max(height, 160),
+             columns: columns.filter(Boolean) };
   }
+
+  /** 同一对节点之间的多条边合成一条，标签并列，避免图上画出重叠线。 */
+  function mergeEdges(edges) {
+    var byPair = {}, merged = [];
+    edges.forEach(function (edge) {
+      var a = Math.min(edge.source, edge.target), b = Math.max(edge.source, edge.target);
+      var key = a + ":" + b;
+      if (byPair[key]) {
+        byPair[key].labels.push(relationLabel(edge.relation));
+        byPair[key].items.push(edge);
+        return;
+      }
+      byPair[key] = { edge: edge, items: [edge], labels: [relationLabel(edge.relation)] };
+      merged.push(byPair[key]);
+    });
+    return merged;
+  }
+
+  function renderRelations() {
+    var graph = currentGraph || { nodes: [], edges: [] };
+    var relation = $("relation-filter").value, paper = $("relation-paper").value;
+    var edges = (graph.edges || []).filter(function (edge) {
+      if (relation && relationLabel(edge.relation) !== relation) return false;
+      if (paper && String(edge.source) !== String(paper) && String(edge.target) !== String(paper)) return false;
+      return true;
+    });
+    var keep = {};
+    edges.forEach(function (edge) { keep[edge.source] = 1; keep[edge.target] = 1; });
+    var nodes = (graph.nodes || []).filter(function (node) { return keep[node.id]; });
+    if (paper) nodes = nodes.filter(function (node) { return String(node.id) === String(paper) || keep[node.id]; });
+    renderGraphLegend({ edges: edges });
+    var box = $("graph-svg-box");
+    replaceChildren(box);
+    if (!nodes.length) {
+      box.appendChild(emptyState("🕸", function () { return I18n.t("ui.c06dea6ab401"); },
+        function () { return I18n.t("ui.4d8e2b7ca915"); }));
+      return;
+    }
+    var layout = graphLayout(nodes, edges);
+    var svgNS = "http://www.w3.org/2000/svg";
+    function svgEl(name, attrs, text) {
+      var node = document.createElementNS(svgNS, name);
+      Object.keys(attrs || {}).forEach(function (key) { node.setAttribute(key, attrs[key]); });
+      if (text) node.appendChild(document.createTextNode(text));
+      return node;
+    }
+    var svg = svgEl("svg", { class: "graph-svg", viewBox: "0 0 " + layout.width + " " + layout.height });
+    var defs = svgEl("defs");
+    [["arrow", "var(--accent)"], ["arrow-soft", "#94a0bd"]].forEach(function (pair) {
+      var marker = svgEl("marker", { id: pair[0], viewBox: "0 0 10 10", refX: "9", refY: "5",
+        markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" });
+      marker.appendChild(svgEl("path", { d: "M0 0 L10 5 L0 10 z", fill: pair[1] }));
+      defs.appendChild(marker);
+    });
+    svg.appendChild(defs);
+    var edgeLayer = svgEl("g", { class: "ge-layer" }), nodeLayer = svgEl("g", { class: "gn-layer" });
+    svg.appendChild(edgeLayer); svg.appendChild(nodeLayer);
+
+    mergeEdges(edges).forEach(function (group) {
+      var edge = group.edge, from = layout.positions[edge.source], to = layout.positions[edge.target];
+      if (!from || !to) return;
+      var mutual = edge.direction === "<->";
+      var forward = to.x > from.x || (to.x === from.x && to.y > from.y);
+      var x1 = from.x + (forward ? GRAPH_NODE_W : 0), y1 = from.y + GRAPH_NODE_H / 2;
+      var x2 = to.x + (forward ? 0 : GRAPH_NODE_W), y2 = to.y + GRAPH_NODE_H / 2;
+      if (from.x === to.x) { x1 = from.x + GRAPH_NODE_W * 0.85; x2 = to.x + GRAPH_NODE_W * 0.85; y1 = from.y + GRAPH_NODE_H; y2 = to.y; }
+      var bend = Math.max(40, Math.abs(x2 - x1) / 2);
+      var path = svgEl("path", {
+        class: "ge-line" + (mutual ? " mutual" : ""),
+        d: "M" + x1 + " " + y1 + " C " + (x1 + (forward ? bend : -bend)) + " " + y1 + ", "
+           + (x2 + (forward ? -bend : bend)) + " " + y2 + ", " + x2 + " " + y2,
+        "marker-end": "url(#arrow-soft)", "data-pair": edge.source + ":" + edge.target,
+      });
+      if (mutual) path.setAttribute("marker-start", "url(#arrow-soft)");
+      path.appendChild(svgEl("title", {}, relationLabel(edge.relation) + " · " + Math.round((edge.strength || 0) * 100) + "%"));
+      edgeLayer.appendChild(path);
+      // 箭头上只写关系类型；证据强度是给人看细节用的，放进悬停标题
+      var label = group.labels.join(" / ");
+      var lx = (x1 + x2) / 2, ly = (y1 + y2) / 2;
+      var text = svgEl("text", { class: "ge-label", x: lx, y: ly - 6, "text-anchor": "middle" }, label);
+      edgeLayer.appendChild(text);
+      var rect = svgEl("rect", { class: "ge-label-bg", x: lx - label.length * 6.4 / 2 - 5, y: ly - 17,
+        width: label.length * 6.4 + 10, height: 15, rx: 4 });
+      edgeLayer.insertBefore(rect, text);
+    });
+
+    nodes.forEach(function (node) {
+      var pos = layout.positions[node.id];
+      if (!pos) return;
+      var group = svgEl("g", { class: "gn" + (state.currentPaper && state.currentPaper.id === node.id ? " current" : ""),
+        tabindex: "0", role: "button", "data-node": String(node.id) });
+      group.appendChild(svgEl("rect", { x: pos.x, y: pos.y, width: GRAPH_NODE_W, height: GRAPH_NODE_H, rx: 10 }));
+      var title = shortText(node.label || "", 34);
+      group.appendChild(svgEl("text", { class: "gn-t1", x: pos.x + 12, y: pos.y + 24 }, title.slice(0, 20)));
+      if (title.length > 20) group.appendChild(svgEl("text", { class: "gn-t2", x: pos.x + 12, y: pos.y + 40 }, title.slice(20, 40)));
+      group.appendChild(svgEl("text", { class: "gn-meta", x: pos.x + 12, y: pos.y + 53 },
+        [node.arxiv_id, node.year].filter(Boolean).join(" · ")));
+      group.appendChild(svgEl("title", {}, node.label || ""));
+      group.addEventListener("click", function () { openPaperById(node.id); });
+      group.addEventListener("keydown", function (event) { if (event.key === "Enter") openPaperById(node.id); });
+      group.addEventListener("mouseenter", function () { highlightIncident(String(node.id)); });
+      group.addEventListener("mouseleave", function () { highlightIncident(null); });
+      nodeLayer.appendChild(group);
+    });
+    box.appendChild(svg);
+    applyGraphZoom(svg, layout);
+  }
+
+  function highlightIncident(nodeId) {
+    Array.prototype.forEach.call($("graph-svg-box").querySelectorAll(".ge-line"), function (path) {
+      var pair = path.getAttribute("data-pair") || "";
+      path.classList.toggle("active", !!nodeId && pair.split(":").indexOf(nodeId) >= 0);
+    });
+  }
+
+  var graphBox = { width: 640, height: 320 };
+
+  // 缩放只改内联尺寸、不重画：记住上一次布局，按钮才有效
+  function applyGraphZoom(svg, layout) {
+    if (layout) graphBox = layout;
+    var host = $("graph-svg-box");
+    svg = svg || host.querySelector("svg");
+    if (!svg) return;
+    var model = graphBox;
+    // 尺寸必须写在内联样式上：早先 CSS 里的 width:100% 会让缩放按钮形同虚设
+    svg.style.width = Math.round(model.width * graphZoom) + "px";
+    svg.style.height = Math.round(model.height * graphZoom) + "px";
+    I18n.write($("graph-zoom-label"), Math.round(graphZoom * 100) + "%");
+  }
+
 
   function shortText(text, n) {
     text = String(text || "");
@@ -1355,7 +1150,9 @@
                          reasoning_effort: a.reasoning_effort };
       });
       state.artifacts = meta;
+      state.knowledge = { memberships: (data && data.memberships) || [], edges: (data && data.edges) || [] };
       setArtifactTabs(meta);
+      renderAiActions(paper);
       return meta;
     }).catch(function () { if (state.currentPaper && state.currentPaper.id === paper.id) setArtifactTabs({}); return {}; });
   }
@@ -1552,21 +1349,47 @@
     ]));
   }
 
-  function openPipelineDialog(paper) {
-    paper = paper || state.currentPaper;
+  // 知识网络的四步拆成四个独立动作：各自可单独触发、单独重跑，不再"一次跑完整条"。
+  var AI_STEPS = { summary: "summary", tree: "tree", deep: "deep_reading", graph: "graph" };
+
+  /** 列表行上的快捷入口：先选要跑的那一步。 */
+  function askAiStepFor(paper) {
+    askChoice(function () { return I18n.t("ui.901034152f20"); },
+      [function () { return shortText(paper.title || paper.arxiv_id, 48); }],
+      ["summary", "tree", "deep", "graph"].map(function (step) {
+        return { text: function () { return I18n.t("stage." + step); }, value: step };
+      })).then(function (step) {
+        if (!step) return;
+        if (!state.currentPaper || state.currentPaper.id !== paper.id) selectPaper(paper);
+        runAiStep(step, false);
+      });
+  }
+
+  function runAiStep(step, force) {
+    var paper = state.currentPaper;
     if (!paper) { toast(function () { return I18n.t("ui.7912dc9e9b8b"); }, "err"); return; }
-    loadPipelineSteps().then(function (steps) {
-      return askChoice(function () { return I18n.t("ui.901034152f20"); }, [
-        function () { return shortText(paper.title || paper.arxiv_id, 44) + ": " + steps.map(function (s) { return I18n.t("stage." + s.name); }).join(" → "); },
-        function () { return I18n.t("ui.18f4736c8abb"); },
-        function () { return I18n.t("ui.048b1181d596"); },
-      ], [
-        { text: function () { return I18n.t("ui.1a471a2283ce"); }, value: "run" },
-        { text: function () { return I18n.t("ui.5a3f4d156660"); }, value: "force" },
-      ]);
-    }).then(function (choice) {
-      if (!choice) return;
-      runPaperPipeline(paper, choice === "force");
+    runPaperPipeline(paper, !!force, [step]);
+  }
+
+  /** 每个动作按钮上直接显示这一步的现有结果，让"做过没有"一眼可见。 */
+  function renderAiActions(paper) {
+    var knowledge = (paper && state.knowledge) || {};
+    var artifacts = (paper && state.artifacts) || {};
+    var states = {
+      summary: artifacts.summary ? shortChars(artifacts.summary.chars) : I18n.t("ui.278e5034a88e"),
+      deep: artifacts.deep_reading ? shortChars(artifacts.deep_reading.chars) : I18n.t("ui.278e5034a88e"),
+      tree: (knowledge.memberships && knowledge.memberships.length)
+        ? (knowledge.memberships[0].name || knowledge.memberships[0].path || "") : I18n.t("ui.278e5034a88e"),
+      graph: (knowledge.edges && knowledge.edges.length)
+        ? I18n.t("ui.ed2c4e1c9c3b") + knowledge.edges.length : I18n.t("ui.278e5034a88e"),
+    };
+    Object.keys(AI_STEPS).forEach(function (step) {
+      var button = $("ai-" + step);
+      if (!button) return;
+      var chip = button.querySelector(".aa-state");
+      button.classList.toggle("done", step === "tree" ? !!states.tree && states.tree !== I18n.t("ui.278e5034a88e")
+        : !!states[step] && states[step] !== I18n.t("ui.278e5034a88e"));
+      if (chip) I18n.bind(chip, function () { return states[step]; });
     });
   }
 
@@ -1622,6 +1445,10 @@
         }
         setPipelineState(ok ? "done" : "failed");
         refresh();
+        if (onlySteps && onlySteps.length === 1 && onlySteps[0] === "graph" && ok
+            && state.currentPaper && state.currentPaper.id === paper.id) {
+          showPaperGraph(state.currentPaper);   // 关系步的结果是一张图，跑完就地打开
+        }
         // 产物刷新后直接打开，避免“跑完了但找不到输出”
         loadPaperArtifacts(paper).then(function (meta) {
           if (!state.currentPaper || state.currentPaper.id !== paper.id) return;
@@ -1649,213 +1476,30 @@
     });
   }
 
-  // ---------------- PDF 查看器（服务端逐页渲染 + 原生 JS 缩放） ----------------
-  // 为什么不用浏览器内置 <iframe> viewer：它跑在跨源上下文里，外部无法控制缩放；
-  // 项目约定前端零第三方依赖（不引 CDN 版 PDF.js），因此改为服务端 PyMuPDF 把每页
-  // 渲染成 PNG，前端自绘可缩放查看器：
-  //   滚轮向上放大 / 向下缩小（默认），触控板捏合（ctrl+wheel）缩放，按住拖动平移；
-  //   工具栏可把滚轮切换为“滚动”（此时捏合与 Ctrl+滚轮仍缩放）。
-  var PDFV_PT_TO_PX = 96 / 72;             // PDF point -> CSS px（zoom=1 即实际尺寸）
-  var PDFV_MIN_REL = 0.5;                  // 相对“适应宽度”的最小缩放
-  var PDFV_MAX_REL = 6.0;
-  var pdfView = {
-    paperId: null, pages: [], zoom: 1, fitZoom: 1, basePx: 0, wheelZoom: true,
-    anchorY: null, pendingFactor: 1, rafPending: false,
-  };
+  // ---------------- 阅读栏（PDF + 划词译文侧栏） ----------------
+  // PDF 渲染在 pdfview.js（本地 PDF.js + 文字层），译文面板在 translate.js；
+  // 这里只负责"选中论文 -> 打开阅读器 -> 换论文时收尾"。
+  function readerVisible() { return !$("reader-shell").classList.contains("hidden"); }
 
-  function pdfvVisible() { return !$("pdf-viewer").classList.contains("hidden"); }
-
-  function showPdfViewer(paper) {
-    pdfView.paperId = paper.id;
-    pdfView.pages = [];
-    pdfView.zoom = 1;
-    pdfView.fitZoom = 1;
-    pdfView.pendingFactor = 1;
-    $("pdfv-native").setAttribute("href", "/api/papers/" + paper.id + "/pdf");
-    $("pdf-viewer").classList.remove("hidden");
+  function showReader(paper) {
+    $("reader-shell").classList.remove("hidden");
     $("viewer-empty").classList.add("hidden");
-    var pagesBox = $("pdfv-pages");
-    replaceChildren(pagesBox, skeleton("cards", 3));
-    I18n.write($("pdfv-pageno"), "…");
-    api.get("/api/papers/" + paper.id + "/pages").then(function (data) {
-      if (pdfView.paperId !== paper.id) return;      // 加载期间用户已切走
-      pdfView.pages = data.pages || [];
-      buildPdfPages();
-      fitPdfWidth(false);
-    }).catch(function (e) {
-      if (pdfView.paperId !== paper.id) return;
-      replaceChildren(pagesBox, emptyState("📄", function () { return I18n.t("ui.b937d8263bfb"); }, function () { return e.message; }));
-      I18n.write($("pdfv-pageno"), "");
-    });
+    if (!PdfView.isVisible()) { PdfView.open(paper); Translate.clear(); }
   }
 
-  function hidePdfViewer() { $("pdf-viewer").classList.add("hidden"); }
-
-  function buildPdfPages() {
-    var box = $("pdfv-pages");
-    replaceChildren(box);
-    var maxW = 612;
-    pdfView.pages.forEach(function (p) { maxW = Math.max(maxW, p.width || 612); });
-    pdfView.basePx = maxW * PDFV_PT_TO_PX;
-    pdfView.pages.forEach(function (p) {
-      var widthPt = p.width || 612, heightPt = p.height || 792;
-      var wpx = Math.round(widthPt * PDFV_PT_TO_PX);
-      var wrapEl = el("div", {
-        class: "pdfv-page", "data-page": String(p.page),
-        style: "--vw: " + wpx + "px; aspect-ratio: " + widthPt + " / " + heightPt,
-      });
-      var img = el("img", {
-        src: "/api/papers/" + pdfView.paperId + "/page/" + p.page + "?scale=2",
-        alt: function () { return I18n.t("ui.9552fe3bd366") + p.page + I18n.t("ui.85ca81cf6abd"); }, loading: "lazy", draggable: "false",
-      });
-      img.addEventListener("error", function () {
-        img.remove();
-        wrapEl.appendChild(el("div", { class: "pdfv-err",
-          text: function () { return I18n.t("ui.9552fe3bd366") + p.page + I18n.t("ui.19f143966b64"); } }));
-      });
-      wrapEl.appendChild(img);
-      box.appendChild(wrapEl);
-    });
-    box.style.setProperty("--pdfv-zoom", String(pdfView.zoom));
-    updatePdfZoomLabel();
-    updatePdfPageLabel();
+  function hideReader() {
+    $("reader-shell").classList.add("hidden");
+    PdfView.close();
+    Translate.hidePanel();
+    Translate.hide();
   }
 
-  function pdfvContentHeight() { return $("pdfv-pages").getBoundingClientRect().height; }
-
-  function clampPdfZoom(zoom) {
-    var min = pdfView.fitZoom * PDFV_MIN_REL;
-    var max = Math.max(pdfView.fitZoom * PDFV_MAX_REL, 3);
-    return Math.max(min, Math.min(max, zoom));
+  function initReaderEvents() {
+    PdfView.init();
+    Translate.init(function () { return state.currentPaper && state.currentPaper.id; });
+    Translate.watch($("pdf-scroll"));
   }
 
-  /** 缩放并保持锚点处的内容位置不变（滚轮向上放大 / 向下缩小都走这里）。 */
-  function applyPdfZoom(factor, anchorY) {
-    if (!pdfView.pages.length) return;
-    var scroll = $("pdfv-scroll");
-    var oldZoom = pdfView.zoom;
-    var newZoom = clampPdfZoom(oldZoom * factor);
-    if (Math.abs(newZoom - oldZoom) < 1e-4) return;
-    var ay = (anchorY === null || anchorY === undefined) ? scroll.clientHeight / 2 : anchorY;
-    var oldRatio = (scroll.scrollTop + ay) / Math.max(1, pdfvContentHeight());
-    pdfView.zoom = newZoom;
-    $("pdfv-pages").style.setProperty("--pdfv-zoom", String(newZoom));
-    scroll.scrollTop = Math.max(0, oldRatio * Math.max(1, pdfvContentHeight()) - ay);
-    updatePdfZoomLabel();
-  }
-
-  function fitPdfWidth(scrollToTop) {
-    var scroll = $("pdfv-scroll");
-    if (!pdfView.basePx || !scroll.clientWidth) return;
-    var avail = Math.max(120, scroll.clientWidth - 26);
-    pdfView.fitZoom = Math.max(0.1, Math.min(5, avail / pdfView.basePx));
-    pdfView.zoom = pdfView.fitZoom;
-    $("pdfv-pages").style.setProperty("--pdfv-zoom", String(pdfView.zoom));
-    if (scrollToTop) scroll.scrollTop = 0;
-    updatePdfZoomLabel();
-    updatePdfPageLabel();
-  }
-
-  function updatePdfZoomLabel() {
-    var label = $("pdfv-label");
-    if (label) I18n.write(label, Math.round(pdfView.zoom * 100) + "%");
-  }
-
-  function updatePdfPageLabel() {
-    var box = $("pdfv-pageno");
-    if (!box) return;
-    var total = pdfView.pages.length;
-    if (!total) { I18n.write(box, ""); return; }
-    var scroll = $("pdfv-scroll");
-    var pages = scroll.querySelectorAll(".pdfv-page");
-    var viewTop = scroll.getBoundingClientRect().top;
-    var current = 1;
-    for (var i = 0; i < pages.length; i++) {
-      var rect = pages[i].getBoundingClientRect();
-      if (rect.top - viewTop <= scroll.clientHeight * 0.45) current = i + 1;
-      else break;
-    }
-    I18n.write(box, current + " / " + total);
-  }
-
-  // 滚轮 / 触控板捏合：ctrl+wheel 是浏览器对捏合的标准化事件；
-  // 默认模式下普通滚轮也缩放（需求：向上放大、向下缩小），可在工具栏切回滚动。
-  function onPdfvWheel(e) {
-    if (!pdfvVisible()) return;
-    var zoomIntent = e.ctrlKey || pdfView.wheelZoom;
-    if (!zoomIntent) return;                 // 滚动模式：交还浏览器默认滚动
-    e.preventDefault();
-    var rect = $("pdfv-scroll").getBoundingClientRect();
-    pdfView.anchorY = e.clientY - rect.top;
-    pdfView.pendingFactor *= Math.pow(1.0016, -e.deltaY);
-    if (pdfView.rafPending) return;
-    pdfView.rafPending = true;
-    requestAnimationFrame(function () {
-      pdfView.rafPending = false;
-      var factor = pdfView.pendingFactor;
-      pdfView.pendingFactor = 1;
-      applyPdfZoom(factor, pdfView.anchorY);
-    });
-  }
-
-  var pdfvScrollTimer = null;
-  function onPdfvScroll() {
-    if (pdfvScrollTimer) return;
-    pdfvScrollTimer = setTimeout(function () {
-      pdfvScrollTimer = null;
-      updatePdfPageLabel();
-    }, 120);
-  }
-
-  // 按住拖动平移（滚轮被绑为缩放后，拖拽是主要的快速翻阅方式）
-  var pdfvDrag = null;
-  function beginPdfvDrag(e) {
-    if (e.button !== 0 || !pdfvVisible()) return;
-    var scroll = $("pdfv-scroll");
-    pdfvDrag = { x: e.clientX, y: e.clientY, left: scroll.scrollLeft, top: scroll.scrollTop };
-    scroll.classList.add("dragging");
-    window.addEventListener("pointermove", movePdfvDrag);
-    window.addEventListener("pointerup", endPdfvDrag);
-    e.preventDefault();
-  }
-  function movePdfvDrag(e) {
-    if (!pdfvDrag) return;
-    var scroll = $("pdfv-scroll");
-    scroll.scrollLeft = pdfvDrag.left - (e.clientX - pdfvDrag.x);
-    scroll.scrollTop = pdfvDrag.top - (e.clientY - pdfvDrag.y);
-  }
-  function endPdfvDrag() {
-    if (!pdfvDrag) return;
-    pdfvDrag = null;
-    $("pdfv-scroll").classList.remove("dragging");
-    window.removeEventListener("pointermove", movePdfvDrag);
-    window.removeEventListener("pointerup", endPdfvDrag);
-  }
-
-  function togglePdfvWheel() {
-    pdfView.wheelZoom = !pdfView.wheelZoom;
-    var btn = $("pdfv-wheel");
-    btn.classList.toggle("on", pdfView.wheelZoom);
-    I18n.bind(btn, function () { return pdfView.wheelZoom ? I18n.t("ui.1319f2cd3495") : I18n.t("ui.31f236936f09"); });
-    toast(function () { return pdfView.wheelZoom
-      ? I18n.t("ui.d066c4098c2b")
-      : I18n.t("ui.c1c6d2e289eb"); }, "info", 4200);
-  }
-
-  function initPdfvEvents() {
-    var scroll = $("pdfv-scroll");
-    if (!scroll) return;
-    scroll.addEventListener("wheel", onPdfvWheel, { passive: false });
-    scroll.addEventListener("scroll", onPdfvScroll);
-    scroll.addEventListener("pointerdown", beginPdfvDrag);
-    if (typeof ResizeObserver !== "undefined") {
-      // 栏宽拖拽不触发 window.resize：处于“适应宽度”时跟随容器宽度重新适配
-      new ResizeObserver(function () {
-        if (!pdfvVisible() || !pdfView.basePx) return;
-        if (Math.abs(pdfView.zoom - pdfView.fitZoom) < 0.002) fitPdfWidth(false);
-      }).observe(scroll);
-    }
-  }
 
   // ---------------- 论文列表 ----------------
   function loadPapers() {
@@ -1887,11 +1531,10 @@
         class: "badge folder" + (p.folder_is_direction ? " direction" : ""),
         text: p.folder_name,
       }));
-      if (p.text_truncated) badges.appendChild(el("span", { class: "badge trunc", text: function () { return I18n.t("ui.4fb9aa6ebc50"); } }));
       if (!p.has_text) badges.appendChild(el("span", { class: "badge notext", text: function () { return I18n.t("ui.394aa37b1840"); } }));
       var ops = el("div", { class: "p-ops" }, [
         el("button", { title: function () { return I18n.t("ui.95b8cf2c1641"); }, text: "🧠",
-          onclick: function (e) { e.stopPropagation(); openPipelineDialog(p); } }),
+          onclick: function (e) { e.stopPropagation(); askAiStepFor(p); } }),
         el("button", { title: function () { return I18n.t("ui.711c5507708d"); }, text: "📁", onclick: function (e) { e.stopPropagation(); openMoveModal(p); } }),
         el("button", { class: "del", title: function () { return I18n.t("ui.b5c234015cf4"); }, text: "🗑", onclick: function (e) { e.stopPropagation(); deletePaper(p); } }),
       ]);
@@ -1915,7 +1558,7 @@
     }
     hideNodeGraph();
     state.currentPaper = p; renderPapers();
-    showPdfViewer(p);
+    showReader(p);
     $("viewer-toolbar").classList.remove("hidden");
     I18n.write($("viewer-title"), p.title || p.arxiv_id);
     I18n.write($("chat-title"), p.title || p.arxiv_id);
@@ -1939,7 +1582,6 @@
       box.className = "ctx-status ok";
       var n = (p.text_chars || 0).toLocaleString();
       box.appendChild(el("span", { text: function () { return I18n.t("ui.f75d1b2e9616") + n + I18n.t("ui.41e795320fb9"); } }));
-      if (p.text_truncated) box.appendChild(el("span", { text: function () { return I18n.t("ui.8c768b791bee"); } }));
     } else {
       box.className = "ctx-status warn";
       box.appendChild(el("span", { text: function () { return I18n.t("ui.962d7c4ad434"); } }));
@@ -1996,12 +1638,13 @@
   }
   function confirmMove() {
     if (!movingPaper) return;
+    // 空值合法：表示从子文件夹移回"全部论文"
     var val = $("move-folder").value;
-    if (!val) { toast(function () { return I18n.t("ui.7383d2b307f9"); }, "err"); return; }
-    var fid = parseInt(val, 10);
+    var fid = val === "" ? null : parseInt(val, 10);
     api.patch("/api/papers/" + movingPaper.id, { folder_id: fid }).then(function (updated) {
       $("move-modal").classList.add("hidden");
-      toast(function () { return I18n.t("ui.87e677e8ece8") + (updated.folder_name || ""); }, "ok");
+      toast(function () { return I18n.t("ui.87e677e8ece8")
+        + (updated.folder_name || I18n.t("ui.c4fb397688ed")); }, "ok");
       if (state.currentPaper && state.currentPaper.id === updated.id) state.currentPaper = updated;
       movingPaper = null;
       return Promise.all([loadFolders(), loadPapers()]);
@@ -2022,10 +1665,8 @@
   }
   function clearCurrentPaper() {
     state.currentPaper = null; state.sessions = []; state.currentSessionId = null;
-    state.artifacts = {};
-    hidePdfViewer();
-    replaceChildren($("pdfv-pages"));
-    pdfView.paperId = null; pdfView.pages = [];
+    state.artifacts = {}; state.knowledge = { memberships: [], edges: [] };
+    hideReader();
     $("viewer-empty").classList.remove("hidden");
     $("viewer-toolbar").classList.add("hidden");
     I18n.bind($("chat-title"), function () { return I18n.t("ui.e63a45a5fc1e"); });
@@ -2034,17 +1675,6 @@
     showChatView();
     updateCtxStatus(null);
     renderMessages([]);
-  }
-  function reextractPaper() {
-    var p = state.currentPaper; if (!p) { toast(function () { return I18n.t("ui.7912dc9e9b8b"); }, "err"); return; }
-    var btn = $("reextract-paper"); btn.disabled = true; var old = btn.textContent; I18n.bind(btn, function () { return I18n.t("ui.285d723101d5"); });
-    api.post("/api/papers/" + p.id + "/reextract").then(function (updated) {
-      state.currentPaper = updated;
-      updateCtxStatus(updated);
-      loadPapers();
-      toast(function () { return updated.has_text ? (I18n.t("ui.2529cfe0f6de") + (updated.text_chars || 0).toLocaleString() + I18n.t("ui.340d059fcaae")) : I18n.t("ui.28ad7b4c4e98"); }, "ok");
-    }).catch(function (e) { toast(function () { return I18n.t("ui.8bf743903bbf") + e.message; }, "err"); })
-      .then(function () { btn.disabled = false; I18n.write(btn, old); });
   }
 
   // ---------------- 对话 ----------------
@@ -2393,55 +2023,6 @@
       .finally(function () { $("test-llm").disabled = false; });
   }
 
-  // ---------------- 规则 ----------------
-  function openRules() { renderFolderSelects(); loadRules(); $("rules-modal").classList.remove("hidden"); }
-  function loadRules() {
-    api.get("/api/rules").then(function (rules) {
-      var box = $("rule-list"); replaceChildren(box);
-      if (!rules.length) { box.appendChild(el("div", { class: "empty", text: function () { return I18n.t("ui.7c8b25b3a0e1"); } })); return; }
-      rules.forEach(function (r) {
-        var fname = r.folder_name || I18n.t("ui.ccb91ce53df9");
-        var item = el("div", { class: "rule-item" + (r.enabled ? "" : " disabled") }, [
-          el("div", { class: "r-main" }, [
-            el("span", { class: "r-type", text: r.match_type }),
-            el("span", { class: "r-pat", text: " " + r.pattern }),
-            el("span", { class: "r-folder", text: "  → " + fname + " · p" + r.priority + (r.name ? (" · " + r.name) : "") }),
-          ]),
-          el("div", { class: "r-ops" }, [
-            el("button", { class: "mini", text: function () { return r.enabled ? I18n.t("ui.4e6fd0e28c55") : I18n.t("ui.f4f0ead1116b"); }, onclick: function () { toggleRule(r); } }),
-            el("button", { class: "mini", text: function () { return I18n.t("ui.2f9daa828907"); }, onclick: function () { deleteRule(r); } }),
-          ]),
-        ]);
-        box.appendChild(item);
-      });
-    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
-  }
-  function addRule() {
-    var pattern = $("rule-pattern").value.trim();
-    if (!pattern) { toast(function () { return I18n.t("ui.31ce6a2cda6f"); }, "err"); return; }
-    var folderVal = $("rule-folder").value;
-    var body = {
-      name: $("rule-name").value.trim(),
-      match_type: $("rule-type").value,
-      pattern: pattern,
-      folder_id: folderVal ? parseInt(folderVal, 10) : null,
-      priority: parseInt($("rule-priority").value, 10) || 100,
-      enabled: true,
-    };
-    api.post("/api/rules", body).then(function () {
-      $("rule-pattern").value = ""; $("rule-name").value = "";
-      loadRules(); toast(function () { return I18n.t("ui.1c52c093fe6b"); }, "ok");
-    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
-  }
-  function toggleRule(r) { api.patch("/api/rules/" + r.id, { enabled: !r.enabled }).then(loadRules).catch(function (e) { toast(function () { return e.message; }, "err"); }); }
-  function deleteRule(r) {
-    askConfirm(function () { return I18n.t("ui.c02fdcf208b3"); }, [function () { return I18n.t("ui.9fad3beb4471") + (r.name || (r.match_type + " " + r.pattern)) + "」？"; }],
-      { okText: I18n.t("ui.2f9daa828907"), danger: true }).then(function (ok) {
-      if (!ok) return null;
-      return api.del("/api/rules/" + r.id).then(loadRules).catch(function (e) { toast(function () { return e.message; }, "err"); });
-    });
-  }
-
   // ---------------- 布局：拖拽伸缩 + 折叠隐藏 ----------------
   var PANES = ["sidebar", "list", "viewer", "chat"];
   var RESIZER_OF = { sidebar: "rz-sidebar", list: "rz-list", chat: "rz-chat" };
@@ -2619,11 +2200,10 @@
     $("r-continue").addEventListener("click", function () { startRelated("continue"); });
     $("r-retry").addEventListener("click", function () { startRelated("retry"); });
     $("r-show-discarded").addEventListener("change", loadRelated);
-    $("graph-toggle").addEventListener("click", function () { $("graph-svg-box").classList.toggle("hidden"); });
     $("relation-filter").addEventListener("change", renderRelations);
     $("relation-paper").addEventListener("change", renderRelations);
-    $("graph-zoom-in").addEventListener("click", function () { graphZoom = Math.min(3, graphZoom * 1.2); renderRelations(); });
-    $("graph-zoom-out").addEventListener("click", function () { graphZoom = Math.max(.5, graphZoom / 1.2); renderRelations(); });
+    $("graph-zoom-in").addEventListener("click", function () { graphZoom = Math.min(3, graphZoom * 1.2); applyGraphZoom(); });
+    $("graph-zoom-out").addEventListener("click", function () { graphZoom = Math.max(.4, graphZoom / 1.2); applyGraphZoom(); });
     $("graph-reset").addEventListener("click", function () { graphZoom = 1; $("relation-paper").value = ""; $("relation-filter").value = ""; renderRelations(); });
   }
 
@@ -2669,23 +2249,29 @@
     $("open-settings").addEventListener("click", openSettings);
     $("save-settings").addEventListener("click", function () { saveSettings(false); });
     $("test-llm").addEventListener("click", testLLM);
-    $("open-rules").addEventListener("click", openRules);
-    $("add-rule").addEventListener("click", addRule);
 
     // 论文操作（预览工具栏）
-    $("run-pipeline").addEventListener("click", function () { openPipelineDialog(state.currentPaper); });
+    $("open-graph").addEventListener("click", function () {
+      if (state.currentPaper) showPaperGraph(state.currentPaper);
+    });
+    $("graph-close").addEventListener("click", restoreViewerAfterGraph);
+    Object.keys(AI_STEPS).forEach(function (step) {
+      $("ai-" + step).addEventListener("click", function () {
+        if ($("ai-" + step).classList.contains("done")) {
+          askConfirm(function () { return I18n.t("stage." + step); },
+            [function () { return I18n.t("ui.d96cdfcd33d3"); }],
+            { okText: function () { return I18n.t("ui.5a3f4d156660"); } }).then(function (ok) { if (ok) runAiStep(step, true); });
+          return;
+        }
+        runAiStep(step, false);
+      });
+    });
     $("move-paper").addEventListener("click", function () { if (state.currentPaper) openMoveModal(state.currentPaper); });
     $("delete-paper").addEventListener("click", function () { if (state.currentPaper) deletePaper(state.currentPaper); });
-    $("reextract-paper").addEventListener("click", reextractPaper);
     $("move-confirm").addEventListener("click", confirmMove);
 
-    // PDF 查看器：缩放按钮 / 滚轮与拖拽监听
-    if ($("pdfv-in")) $("pdfv-in").addEventListener("click", function () { applyPdfZoom(1.25, null); });
-    if ($("pdfv-out")) $("pdfv-out").addEventListener("click", function () { applyPdfZoom(1 / 1.25, null); });
-    if ($("pdfv-fit")) $("pdfv-fit").addEventListener("click", function () { fitPdfWidth(false); });
-    if ($("pdfv-label")) $("pdfv-label").addEventListener("click", function () { fitPdfWidth(false); });
-    if ($("pdfv-wheel")) $("pdfv-wheel").addEventListener("click", togglePdfvWheel);
-    initPdfvEvents();
+    // 阅读栏：PDF 模式与重排模式的切换、重排任务、划词翻译接管选区
+    initReaderEvents();
 
     // 布局：顶栏切换按钮 + 各面板隐藏按钮 + 拖拽分隔条
     document.querySelectorAll(".layout-toggles .lt").forEach(function (b) {
@@ -2750,13 +2336,6 @@
     });
 
     // 检索页与图谱
-    if ($("open-search")) $("open-search").addEventListener("click", openSearch);
-    if ($("s-run")) $("s-run").addEventListener("click", startSearch);
-    if ($("s-cancel")) $("s-cancel").addEventListener("click", cancelSearch);
-    if ($("s-select-all")) $("s-select-all").addEventListener("change", function () {
-      toggleSelectAllBuffer($("s-select-all").checked);
-    });
-    if ($("s-batch-reject")) $("s-batch-reject").addEventListener("click", rejectSelectedBuffer);
 
     // 智能关联检索（预览工具栏入口 + 弹窗内操作）
     if ($("run-related")) $("run-related").addEventListener("click", function () { openRelated(state.currentPaper); });
@@ -2785,8 +2364,10 @@
         return;
       }
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        // ⌘K / Ctrl+K：聚焦论文筛选框（原来是 arXiv 批量检索，该功能已下线）
         e.preventDefault();
-        openSearch();
+        $("search").focus();
+        $("search").select();
       }
     });
   }

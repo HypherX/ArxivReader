@@ -5,7 +5,7 @@
   规则归档(未指定文件夹时) -> 落库
 本地上传（POST /api/papers/upload）：
   校验 PDF -> 内容哈希生成 local- 前缀 id -> 去重 -> 落盘 -> 抽取全文 -> 落库
-  本地论文没有 arXiv 元数据，不走归档规则；标题取 表单 > PDF 元数据 > 文件名。
+  本地论文没有 arXiv 元数据；标题取 表单 > PDF 元数据 > 文件名。
 下载在请求内同步完成（单用户本地场景可接受），失败返回明确的 HTTP 错误。
 """
 
@@ -20,9 +20,9 @@ from fastapi.responses import FileResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from .. import arxiv_service, database, filing, pdf_service, schemas
+from .. import arxiv_service, database, pdf_service, schemas
 from harness.config import get_pdf_dir
-from ..models import LOCAL_ID_PREFIX, FilingRule, Folder, Paper
+from ..models import LOCAL_ID_PREFIX, Folder, Paper
 from knowledge import store
 
 logger = logging.getLogger(__name__)
@@ -32,11 +32,6 @@ router = APIRouter(prefix="/api/papers", tags=["papers"])
 # 上传文件大小上限（100 MB）：本地单用户场景，整文件读入内存校验后落盘
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 _PDF_MAGIC = b"%PDF-"
-
-
-def is_local_paper(paper: Paper) -> bool:
-    """是否为本地上传的论文（相对 arXiv 入库而言）。"""
-    return (paper.arxiv_id or "").startswith(LOCAL_ID_PREFIX)
 
 
 def _safe_dirname(name: str) -> str:
@@ -74,33 +69,27 @@ def add_from_arxiv(body: schemas.PaperFromArxiv, db: Session = Depends(database.
         logger.warning("获取 ArXiv 元数据失败：%s", str(exc)[:300])
         raise HTTPException(status_code=502, detail="获取 ArXiv 元数据失败：%s" % str(exc)[:200])
 
-    # 4) 决定目标文件夹：显式指定 > 规则命中 > Inbox
+    # 4) 目标文件夹：只认用户显式选择；没选就只属于「全部论文」
+    # 4) 归属：选了文件夹就落进去，没选则只属于"全部论文"（folder_id 为空）
     folder_id = body.folder_id
-    if folder_id is not None:
-        if db.get(Folder, folder_id) is None:
-            raise HTTPException(status_code=400, detail="目标文件夹不存在")
-    else:
-        rules = db.query(FilingRule).all()
-        folder_id = filing.apply_rules(filing.target_from_meta(meta), rules)
-    placement_source = "manual" if body.folder_id is not None else ("rule" if folder_id is not None else "auto")
-    if folder_id is None:
-        folder_id = database.ensure_inbox(db).id
+    if folder_id is not None and db.get(Folder, folder_id) is None:
+        raise HTTPException(status_code=400, detail="目标文件夹不存在")
 
     # 5) 下载 PDF
-    folder = db.get(Folder, folder_id)
-    dest_dir = os.path.join(get_pdf_dir(), _safe_dirname(folder.name if folder else "Inbox"))
+    folder = db.get(Folder, folder_id) if folder_id is not None else None
+    dest_dir = os.path.join(get_pdf_dir(), _safe_dirname(folder.name if folder else arxiv_service.UNFILED_DIR))
     try:
         pdf_path = arxiv_service.download_pdf(meta, dest_dir)
     except Exception as exc:  # noqa: BLE001
         logger.warning("下载 PDF 失败：%s", str(exc)[:300])
         raise HTTPException(status_code=502, detail="下载 PDF 失败：%s" % str(exc)[:200])
 
-    # 6) 抽取全文（超长截断），失败不阻断入库
+    # 6) 抽取全文（整篇，不截断），失败不阻断入库
     try:
-        text, truncated = pdf_service.extract_text_for_context(pdf_path)
+        text = pdf_service.extract_text(pdf_path)
     except Exception as exc:  # noqa: BLE001
         logger.warning("PDF 文本抽取失败（%s）：%s", pdf_path, str(exc)[:300])
-        text, truncated = "", False
+        text = ""
 
     # 7) 落库
     paper = Paper(
@@ -114,11 +103,10 @@ def add_from_arxiv(body: schemas.PaperFromArxiv, db: Session = Depends(database.
         pdf_path=str(pdf_path),
         folder_id=folder_id,
         full_text=text,
-        text_truncated=truncated,
     )
     db.add(paper)
     db.flush()
-    store.move_paper_to_folder(db, paper, folder, source=placement_source, commit=False)
+    store.move_paper_to_folder(db, paper, folder, commit=False)
     db.commit()
     db.refresh(paper)
     return paper
@@ -132,7 +120,7 @@ async def upload_pdf(file: UploadFile = File(...),
     """上传本地 PDF 入库。
 
     以文件内容的 SHA-256 生成 `local-` 前缀 id 去重；同一文件重复上传返回 409。
-    没有 arXiv 元数据可匹配归档规则，未指定文件夹时直接落入 Inbox。
+    没有 arXiv 元数据可取，未指定文件夹时只属于「全部论文」。
     损坏/加密到无法打开的 PDF 不入库；扫描版（无文字层）允许入库但全文为空。
     """
     filename = file.filename or ""
@@ -156,14 +144,11 @@ async def upload_pdf(file: UploadFile = File(...),
 
     if folder_id is not None and db.get(Folder, folder_id) is None:
         raise HTTPException(status_code=400, detail={"code": "papers.folder_missing", "params": {}})
-    placement_source = "manual" if folder_id is not None else "auto"
-    if folder_id is None:
-        folder_id = database.ensure_inbox(db).id
-    folder = db.get(Folder, folder_id)
+    folder = db.get(Folder, folder_id) if folder_id is not None else None
 
     # 落盘：<清洗后的文件名>-<hash8>.pdf，同名不同内容不冲突，同内容已被去重拦截
     stem = os.path.splitext(os.path.basename(filename))[0]
-    dest_dir = os.path.join(get_pdf_dir(), _safe_dirname(folder.name if folder else "Inbox"))
+    dest_dir = os.path.join(get_pdf_dir(), _safe_dirname(folder.name if folder else arxiv_service.UNFILED_DIR))
     os.makedirs(dest_dir, exist_ok=True)
     dest_name = "{}-{}.pdf".format(_safe_dirname(stem)[:80] or "paper", digest[:8])
     pdf_path = os.path.join(dest_dir, dest_name)
@@ -172,7 +157,7 @@ async def upload_pdf(file: UploadFile = File(...),
 
     # 抽取全文（同时验证文件可读）；打不开的损坏文件删除落盘副本并拒绝入库
     try:
-        text, truncated = pdf_service.extract_text_for_context(pdf_path)
+        text = pdf_service.extract_text(pdf_path)
     except Exception as exc:  # noqa: BLE001
         logger.warning("上传的 PDF 无法读取（%s）：%s", filename, str(exc)[:300])
         try:
@@ -193,11 +178,10 @@ async def upload_pdf(file: UploadFile = File(...),
         pdf_path=pdf_path,
         folder_id=folder_id,
         full_text=text,
-        text_truncated=truncated,
     )
     db.add(paper)
     db.flush()
-    store.move_paper_to_folder(db, paper, folder, source=placement_source, commit=False)
+    store.move_paper_to_folder(db, paper, folder, commit=False)
     db.commit()
     db.refresh(paper)
     return paper
@@ -271,7 +255,7 @@ def get_pdf(paper_id: int, db: Session = Depends(database.get_db)):
     paper = _get_paper_or_404(db, paper_id)
     if not paper.pdf_path or not os.path.isfile(paper.pdf_path):
         raise HTTPException(status_code=404, detail="PDF 文件不存在")
-    # inline 让浏览器直接在 iframe 内渲染，而非触发下载
+    # inline：前端 PDF.js 直接取这个地址渲染，"↗ 原始 PDF" 也用它在新标签页打开
     return FileResponse(
         paper.pdf_path,
         media_type="application/pdf",
@@ -286,90 +270,11 @@ def _pdf_file_or_404(paper: Paper) -> str:
     return paper.pdf_path
 
 
-@router.get("/{paper_id}/pages")
-def get_pdf_pages(paper_id: int, db: Session = Depends(database.get_db)):
-    """PDF 页面清单（页数 + 每页尺寸）：前端自绘查看器的布局占位与缩放基算。"""
-    paper = _get_paper_or_404(db, paper_id)
-    pdf_path = _pdf_file_or_404(paper)
-    try:
-        pages = pdf_service.page_geometry(pdf_path)
-    except Exception as exc:  # noqa: BLE001  损坏文件/渲染库异常
-        logger.warning("解析 PDF 页面失败（%s）：%s", pdf_path, str(exc)[:300])
-        raise HTTPException(status_code=502, detail="解析 PDF 失败：%s" % str(exc)[:200])
-    return {"paper_id": paper.id, "count": len(pages), "pages": pages}
-
-
-@router.get("/{paper_id}/page/{page_no}")
-def get_pdf_page_image(paper_id: int, page_no: int,
-                       scale: float = Query(pdf_service.DEFAULT_RENDER_SCALE, ge=0.5, le=4.0,
-                                            description="渲染倍率（2 约合 144 DPI）"),
-                       db: Session = Depends(database.get_db)):
-    """单页渲染为 PNG：前端查看器据此实现滚轮/触控板缩放（服务端 PyMuPDF，零前端依赖）。"""
-    paper = _get_paper_or_404(db, paper_id)
-    pdf_path = _pdf_file_or_404(paper)
-    try:
-        png = pdf_service.render_page_png(pdf_path, page_no, scale)
-    except IndexError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("渲染 PDF 页面失败（%s p%s）：%s", pdf_path, page_no, str(exc)[:300])
-        raise HTTPException(status_code=502, detail="渲染页面失败：%s" % str(exc)[:200])
-    # 同一页同一倍率的内容不会变化：允许浏览器私有缓存，滚动翻页不重复渲染
-    return Response(content=png, media_type="image/png",
-                    headers={"Cache-Control": "private, max-age=3600"})
-
-
 @router.get("/{paper_id}/text")
 def get_text(paper_id: int, db: Session = Depends(database.get_db)):
     paper = _get_paper_or_404(db, paper_id)
     return {
         "arxiv_id": paper.arxiv_id,
-        "truncated": paper.text_truncated,
         "char_count": len(paper.full_text or ""),
         "text": paper.full_text or "",
     }
-
-
-@router.post("/{paper_id}/reextract", response_model=schemas.PaperOut)
-def reextract_text(paper_id: int, db: Session = Depends(database.get_db)):
-    """重新抽取论文全文（用于入库时抽取失败 / 正文为空的论文恢复）。
-
-    若本地 PDF 存在则直接重抽；否则根据 arxiv_id 重新下载后再抽取。
-    抽取仍失败时返回 502，不覆盖已有内容。
-    """
-    paper = _get_paper_or_404(db, paper_id)
-
-    pdf_path = paper.pdf_path if (paper.pdf_path and os.path.isfile(paper.pdf_path)) else None
-    if pdf_path is None:
-        if is_local_paper(paper):
-            # 本地上传的论文无法从 arXiv 重新下载
-            raise HTTPException(status_code=400,
-                                detail={"code": "papers.local_missing", "params": {}})
-        # 本地无 PDF，尝试重新下载
-        folder = db.get(Folder, paper.folder_id) if paper.folder_id else None
-        dest_dir = os.path.join(
-            get_pdf_dir(), _safe_dirname(folder.name if folder else "Inbox")
-        )
-        try:
-            meta = arxiv_service.fetch_metadata(paper.arxiv_id)
-            downloaded = arxiv_service.download_pdf(meta, dest_dir)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("重抽时重新下载 PDF 失败（%s）：%s", paper.arxiv_id, str(exc)[:300])
-            raise HTTPException(status_code=502, detail="重新下载 PDF 失败：%s" % str(exc)[:200])
-        pdf_path = str(downloaded)
-        paper.pdf_path = pdf_path
-
-    try:
-        text, truncated = pdf_service.extract_text_for_context(pdf_path)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("重新抽取全文失败（%s）：%s", pdf_path, str(exc)[:300])
-        raise HTTPException(status_code=502, detail="抽取全文失败：%s" % str(exc)[:200])
-
-    if not text.strip():
-        raise HTTPException(status_code=502, detail="未能从 PDF 抽取到文本（可能是扫描版/图片型 PDF）")
-
-    paper.full_text = text
-    paper.text_truncated = truncated
-    db.commit()
-    db.refresh(paper)
-    return paper

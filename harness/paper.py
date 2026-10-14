@@ -40,7 +40,6 @@ class PaperInput:
     categories: List[str] = field(default_factory=list)
     published: Optional[str] = None
     full_text: str = ""
-    text_truncated: bool = False
 
     _doc: Optional[PaperDocument] = field(default=None, repr=False, compare=False)
 
@@ -54,7 +53,6 @@ class PaperInput:
             categories=_as_list(_pick(obj, "categories")),
             published=_pick(obj, "published"),
             full_text=str(_pick(obj, "full_text", "") or ""),
-            text_truncated=bool(_pick(obj, "text_truncated", False)),
         )
 
     @property
@@ -92,6 +90,4 @@ class PaperInput:
         lines.append(label("- 摘要: {}", "- Abstract: {}").format((self.abstract or label("(未取到摘要)", "(Unavailable)")).strip()))
         if not self.has_body:
             lines.append(label("- 正文: 未抽取到正文（可能是扫描版/图片型 PDF），只能依据标题与摘要作答。", "- Full text: unavailable; answer only from the title and abstract."))
-        elif self.text_truncated:
-            lines.append(label("- 正文: 抽取时已按上限截断，缺少论文末尾部分。", "- Full text: truncated during extraction; the end of the paper is missing."))
         return "\n".join(lines)

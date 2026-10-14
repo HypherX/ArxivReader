@@ -109,10 +109,12 @@ def fetch_metadata(arxiv_id: str) -> PaperMeta:
     )
 
 
+UNFILED_DIR = "Unfiled"   # 未归档论文的 PDF 存放桶：论文只属于"全部论文"时用它
+
 def safe_dirname(name: str) -> str:
-    """文件夹名清洗：去路径分隔符与控制字符，空则回退 Inbox。"""
+    """文件夹名清洗：去路径分隔符与控制字符，空则回退未归档桶名。"""
     cleaned = _UNSAFE_NAME_RE.sub("_", (name or "").strip()).strip(".")
-    return cleaned or "Inbox"
+    return cleaned or UNFILED_DIR
 
 
 def _head(url: str, timeout: float):

@@ -41,8 +41,6 @@
 .relation-card { border: 1px solid #dce2eb; border-radius: 10px; padding: 16px; margin: 10px; background: white; }
 .relation-card .relation-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 .relation-card .relation-title button { text-align: left; max-width: 40%; white-space: normal; }
-#graph-svg-box { overflow: auto; max-height: 650px; } .graph-svg { max-width: none; }
-.relation-node { cursor: pointer; } .relation-node rect { fill: #f4f7ff; stroke: #8498c1; }
 .relation-node.selected rect { fill: #e3eaff; stroke: #405ed1; stroke-width: 2; }
 .relation-node text { fill: #314665; font: 12px system-ui; } .relation-edge { stroke: #bdc8d8; fill: none; stroke-width: 1.5; }
 .relation-edge.active { stroke: #536bcd; stroke-width: 3; }

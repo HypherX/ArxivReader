@@ -46,6 +46,7 @@ class LLMSettings:
     max_retries: int = 2
     output_language: Optional[str] = None
     stream_usage: bool = True     # 流式请求是否带 stream_options.include_usage
+    disable_thinking: bool = False  # 关闭模型思考（翻译等追求首字速度的场景）
 
     def __post_init__(self):
         from .privacy import protect
@@ -112,9 +113,14 @@ def build_params(settings: LLMSettings, messages: List[Dict[str, Any]],
         params["max_tokens"] = settings.max_tokens
     if settings.top_p is not None:
         params["top_p"] = settings.top_p
+    extra: Dict[str, Any] = {}
     if settings.reasoning_effort:
-        # OpenAI SDK 会把 extra_body 的键合并到请求体顶层
-        params["extra_body"] = {"reasoning_effort": settings.reasoning_effort}
+        extra["reasoning_effort"] = settings.reasoning_effort
+    if settings.disable_thinking:
+        # 支持的模型经 extra_body 关思考（SDK 会合并到请求体顶层），不支持的会忽略该键。
+        extra["enable_thinking"] = False
+    if extra:
+        params["extra_body"] = extra
     if tools:
         params["tools"] = tools
     if stream:

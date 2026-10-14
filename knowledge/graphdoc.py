@@ -20,7 +20,6 @@ from app.models import DirectionNode, Paper, PaperDirection, PaperRelation
 from harness.language import choose
 
 GRAPH_MD_FILENAME = "GRAPH.md"
-_TITLE_LIMIT = 28
 _RELATIONS = {
     "cites": ("引用", "Cites"), "extends": ("扩展", "Extends"),
     "improves": ("改进", "Improves"), "contradicts": ("结论冲突", "Contradicts"),
@@ -37,31 +36,8 @@ def _relation_label(relation: str, language: str) -> str:
     return choose({"output_language": language}, *_RELATIONS.get(relation, ("关系待核实", "Unverified relationship")))
 
 
-def _short(text: str, limit: int) -> str:
-    text = (text or "").strip().replace("\n", " ")
-    return text if len(text) <= limit else text[:limit - 1] + "…"
-
-
-def _mermaid_label(text: str) -> str:
-    """Mermaid 标签里不能出现未转义的引号/方括号。"""
-    return _short(text, _TITLE_LIMIT).replace('"', "'").replace("[", "(").replace("]", ")")
-
-
 def _node_id(paper_id: int) -> str:
     return "P{}".format(paper_id)
-
-
-def render_mermaid(papers: List[Paper], edges: List[PaperRelation], language: str = "zh") -> str:
-    lines = ["```mermaid", "graph LR"]
-    for paper in papers:
-        lines.append('  {}["{}"]'.format(_node_id(paper.id), _mermaid_label(paper.title or paper.arxiv_id)))
-    for edge in edges:
-        arrow = "<-->" if edge.direction == "<->" else "-->"
-        lines.append('  {} {}|"{} {}"| {}'.format(
-            _node_id(edge.src_paper_id), arrow, _relation_label(edge.relation, language), round(edge.strength, 2),
-            _node_id(edge.dst_paper_id)))
-    lines.append("```")
-    return "\n".join(lines)
 
 
 def render_graph_md(db: Session, node: DirectionNode, language: Optional[str] = None) -> str:
@@ -137,8 +113,4 @@ def render_graph_md(db: Session, node: DirectionNode, language: Optional[str] = 
     else:
         out.append(text("无历史阶段综述。新报告从文件夹菜单手动生成。",
                         "No historical review. Generate new reports manually from the folder menu."))
-    out.extend(["", "## 5. " + text("辅助图源码", "Optional diagram source"), "",
-                text("下列 Mermaid 源码供兼容编辑器使用；本阅读页显示源码，关系说明见上文。",
-                     "Mermaid source for compatible editors; this reader shows source code. Read relationship details above."),
-                "", render_mermaid(papers, edges, language), ""])
     return "\n".join(out)

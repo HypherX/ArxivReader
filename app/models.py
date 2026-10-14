@@ -1,6 +1,6 @@
 """ORM 数据模型。
 
-业务表：folders / papers / filing_rules / chat_sessions / chat_messages / settings
+业务表：folders / papers / chat_sessions / chat_messages / settings
 authors、categories 以 JSON 文本存储，通过属性辅助方法读写。
 
 知识网络（论文阅读 -> 方向树 / 局部图谱 / 阶段综述）：
@@ -76,10 +76,8 @@ class Paper(Base):
     folder_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("folders.id"), nullable=True, index=True
     )
-    placement_source: Mapped[str] = mapped_column(String(16), nullable=False, default="auto")
-    # 抽取的论文全文缓存，供对话阅读直塞上下文；text_truncated 标记是否被截断
+    # 抽取的论文全文缓存，供对话阅读直塞上下文（整篇保存，不做字符截断）
     full_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    text_truncated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     added_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow)
 
     folder: Mapped[Optional["Folder"]] = relationship("Folder", back_populates="papers")
@@ -141,27 +139,6 @@ class Paper(Base):
     def folder_is_direction(self) -> bool:
         """所在文件夹是否为方向树镜像（🧭）：前端据此区分“自建分类”与“模型长出的方向”。"""
         return bool(self.folder and self.folder.direction_node_id)
-
-
-class FilingRule(Base):
-    """自动归档规则：命中后把论文放入 folder_id。priority 越小越先匹配。"""
-
-    __tablename__ = "filing_rules"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    # category | keyword | author | title
-    match_type: Mapped[str] = mapped_column(String(32), nullable=False)
-    pattern: Mapped[str] = mapped_column(String(255), nullable=False)
-    folder_id: Mapped[Optional[int]] = mapped_column(ForeignKey("folders.id"), nullable=True)
-    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
-    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-
-    folder: Mapped[Optional["Folder"]] = relationship("Folder")
-
-    @property
-    def folder_name(self) -> Optional[str]:
-        return self.folder.name if self.folder else None
 
 
 class ChatSession(Base):
@@ -468,124 +445,11 @@ class PipelineRun(Base):
             return []
 
 
-# ---------------------------------------------------------------- 检索 Pipeline 与缓冲区
-class BufferPaper(Base):
-    """待读缓冲区：检索 Pipeline 筛查通过、但尚未纳入正式知识库的论文。
-
-    与 papers 的区别：缓冲区论文**只有元信息 + 预筛/摘要结果，不下载全文**，也没做深读与图谱；
-    用户点"加入详细阅读"后才迁移成 Paper（下载全文）并触发单篇 pipeline。
-
-    status ∈ {pending, read, rejected}：pending=留在缓冲区；read=已迁入正式库；rejected=用户丢弃。
-    """
-
-    __tablename__ = "buffer_papers"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    arxiv_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
-    title: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    abstract: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    authors_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    categories_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    published: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    # 预筛结果
-    match_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    suggested_path: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
-    matched_node_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("direction_nodes.id"), nullable=True, index=True
-    )
-    screen_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    # 快速总结验证（Step 3）
-    summary_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    summary_stats_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    verify_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    verified_path: Mapped[str] = mapped_column(String(1024), nullable=False, default="")
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
-    # 提升入库（点"加入详细阅读"）的状态：""/queued/running/done/failed
-    promote_state: Mapped[str] = mapped_column(String(16), nullable=False, default="")
-    promote_error: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    promoted_paper_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("papers.id"), nullable=True, index=True
-    )
-    # 来源：检索 run / 手动录入
-    search_run_id: Mapped[Optional[int]] = mapped_column(ForeignKey("search_runs.id"),
-                                                        nullable=True, index=True)
-    source: Mapped[str] = mapped_column(String(16), nullable=False, default="search")
-    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow)
-    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow,
-                                                         onupdate=_utcnow)
-
-    @property
-    def authors(self) -> List[str]:
-        try:
-            return json.loads(self.authors_json or "[]")
-        except (ValueError, TypeError):
-            return []
-
-    @property
-    def categories(self) -> List[str]:
-        try:
-            return json.loads(self.categories_json or "[]")
-        except (ValueError, TypeError):
-            return []
-
-    @property
-    def stats(self) -> dict:
-        try:
-            return json.loads(self.summary_stats_json or "{}")
-        except (ValueError, TypeError):
-            return {}
-
-
-class SearchRun(Base):
-    """一次 ArXiv 检索 Pipeline 的运行状态（前端轮询 /api/search/status 用）。
-
-    status ∈ {running, done, cancelled, failed}；stage ∈ {search, screen, summarize, done}。
-    全部进度/日志以 JSON 存盘，因此进程重启后仍可看到历史（已处理的缓冲区结果不丢）。
-    """
-
-    __tablename__ = "search_runs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
-    stage: Mapped[str] = mapped_column(String(16), nullable=False, default="search")
-    request_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    log_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    counters_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    error: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    started_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow)
-    finished_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
-
-    @property
-    def request(self) -> dict:
-        try:
-            data = json.loads(self.request_json or "{}")
-            return data if isinstance(data, dict) else {}
-        except (ValueError, TypeError):
-            return {}
-
-    @property
-    def logs(self) -> List[dict]:
-        try:
-            data = json.loads(self.log_json or "[]")
-            return data if isinstance(data, list) else []
-        except (ValueError, TypeError):
-            return []
-
-    @property
-    def counters(self) -> dict:
-        try:
-            data = json.loads(self.counters_json or "{}")
-            return data if isinstance(data, dict) else {}
-        except (ValueError, TypeError):
-            return {}
-
-
 # ---------------------------------------------------------------- 智能关联检索（Related Work）
 class RelatedRun(Base):
     """一次「智能关联检索」的运行状态（前端轮询 /api/papers/{id}/related）。
 
-    stage ∈ {collect, extract, search, summarize, judge, done}；
+    stage ∈ {collect, extract, search, judge, done}；
     status ∈ {running, done, cancelled, failed}（与检索 run 同口径，终态必须写 finished_at）。
     """
 

@@ -120,3 +120,4 @@ def call_structured(prompt_name: str, user_text: str, settings: llm.LLMSettings,
 
     return StepOutput(ok=False, usage=dict(usage), latency_ms=int((time.time() - started) * 1000),
                       error=last_error or choose(cfg, "结构化调用失败", "Structured request failed"))
+

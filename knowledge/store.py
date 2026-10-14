@@ -20,9 +20,9 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from harness.config import get_base_dir
-from app.models import (BufferPaper, DirectionNode, FilingRule, Folder, FolderReview, NodeSynthesis, Paper,
+from app.models import (DirectionNode, Folder, FolderReview, NodeSynthesis, Paper,
                         PaperArtifact, PaperArtifactVersion, PaperDirection, PaperRelation, PipelineRun,
-                        RelatedCandidate, RelatedRun, SearchRun)
+                        RelatedCandidate, RelatedRun)
 
 from . import graphdoc
 
@@ -138,7 +138,6 @@ def set_paper_memberships(db: Session, paper: Paper, memberships: Sequence[Dict[
         row.confidence = confidence
         row.output_language = language
         paper.folder_id = folder.id
-        paper.placement_source = source
         db.flush()
         _clean_local_edges(db, paper.id, node.id)
         _recount_ids(db, {old_id, node.id})
@@ -535,6 +534,10 @@ def paper_knowledge_payload(db: Session, paper: Paper) -> Dict[str, Any]:
              .filter((PaperRelation.src_paper_id == paper.id)
                      | (PaperRelation.dst_paper_id == paper.id))
              .order_by(PaperRelation.id.desc()).all())
+    # 图谱要画出对端是谁：把边两端论文的标题/编号一次查出来带上，前端不必再逐条请求
+    endpoint_ids = {value for edge in edges for value in (edge.src_paper_id, edge.dst_paper_id)}
+    endpoints = {row.id: row for row in db.query(Paper).filter(Paper.id.in_(endpoint_ids)).all()} \
+        if endpoint_ids else {}
     runs = (db.query(PipelineRun).filter(PipelineRun.paper_id == paper.id)
             .order_by(PipelineRun.id.desc()).limit(5).all())
     return {
@@ -553,6 +556,10 @@ def paper_knowledge_payload(db: Session, paper: Paper) -> Dict[str, Any]:
             "id": e.id, "node_id": e.node_id, "relation": e.relation,
             "direction": e.direction, "strength": e.strength, "rationale": e.rationale,
             "source": e.src_paper_id, "target": e.dst_paper_id,
+            "source_title": (endpoints.get(e.src_paper_id).title if endpoints.get(e.src_paper_id) else ""),
+            "source_arxiv_id": (endpoints.get(e.src_paper_id).arxiv_id if endpoints.get(e.src_paper_id) else ""),
+            "target_title": (endpoints.get(e.dst_paper_id).title if endpoints.get(e.dst_paper_id) else ""),
+            "target_arxiv_id": (endpoints.get(e.dst_paper_id).arxiv_id if endpoints.get(e.dst_paper_id) else ""),
             "evidence": e.evidence, "output_language": e.output_language,
         } for e in edges],
         "runs": [{
@@ -634,7 +641,6 @@ def move_paper_to_folder(db: Session, paper: Paper, folder: Optional[Folder], *,
     for d in old:
         db.delete(d)
     paper.folder_id = folder.id if folder else None
-    paper.placement_source = source
     db.flush()
     _clean_local_edges(db, paper.id, None)
     _recount_ids(db, old_ids)
@@ -655,7 +661,9 @@ def refresh_nodes(db: Session, nodes: Sequence[DirectionNode], *,
         seen.add(node.id)
         sync_node_folders(db, node)
         exported.append(str(export_node_graph_md(db, node)))
-    if move_paper is not None and move_paper.placement_source == "auto":
+    # 模型分类只落位到"还没有归处"或"上一个方向镜像"里的论文：用户自己建过文件夹的绝不抢走
+    if move_paper is not None and (move_paper.folder_id is None
+                                   or (move_paper.folder and move_paper.folder.direction_node_id)):
         target = move_paper_node or (nodes[0] if nodes else None)
         if target is not None:
             folder = sync_node_folders(db, target)
@@ -765,10 +773,7 @@ def _archive_node_reports(db: Session, node: DirectionNode, folder: Folder) -> N
 
 def delete_folder(db: Session, folder: Folder, *, keep_folder: bool = False) -> int:
     """事务上移子目录与论文，方向归属同步；保留 PDF、对话及全部报告版本。"""
-    from app.database import ensure_inbox, INBOX_NAME
-    if folder.name == INBOX_NAME and folder.parent_id is None:
-        raise ValueError("Inbox 为系统默认文件夹，不能删除")
-    target = db.get(Folder, folder.parent_id) if folder.parent_id else (None if keep_folder else ensure_inbox(db))
+    target = db.get(Folder, folder.parent_id) if folder.parent_id else None
     target_id = target.id if target else None
     children = db.query(Folder).filter_by(parent_id=folder.id).all()
     for child in children:
@@ -794,8 +799,6 @@ def delete_folder(db: Session, folder: Folder, *, keep_folder: bool = False) -> 
             db.expire(node, ["children", "directions", "syntheses"])
             db.delete(node)
         if not keep_folder:
-            db.query(FilingRule).filter_by(folder_id=folder.id).update(
-                {"folder_id": target_id}, synchronize_session="fetch")
             db.expire(folder, ["children", "papers"])
             db.delete(folder)
         db.commit()
@@ -821,7 +824,9 @@ def repair_paper_folders(db: Session) -> int:
     """
     moved = 0
     for direction in db.query(PaperDirection).order_by(PaperDirection.id).all():
-        if direction.role != "primary" or direction.node is None or direction.paper is None or direction.paper.placement_source != "auto":
+        paper = direction.paper
+        if (direction.role != "primary" or direction.node is None or paper is None
+                or (paper.folder and not paper.folder.direction_node_id)):
             continue
         folder = sync_node_folders(db, direction.node)
         if folder is not None and direction.paper.folder_id != folder.id:
@@ -832,163 +837,18 @@ def repair_paper_folders(db: Session) -> int:
     return moved
 
 
-# ---------------------------------------------------------------- 缓冲区（待读区）
-BUFFER_PENDING = "pending"
-BUFFER_READ = "read"
-BUFFER_REJECTED = "rejected"
+# ---------------------------------------------------------------- 长任务日志与状态
+RUN_LOG_TAIL = 300
 
 
-def upsert_buffer_paper(db: Session, hit: Any, *, match_score: float = 0.0,
-                        suggested_path: str = "", matched_node_id: Optional[int] = None,
-                        screen_reason: str = "", search_run_id: Optional[int] = None,
-                        source: str = "search") -> BufferPaper:
-    """写入/更新缓冲区条目（按 arxiv_id 去重，不覆写已完成的总结与状态）。"""
-    data = hit.as_dict() if hasattr(hit, "as_dict") else dict(hit)
-    arxiv_id = str(data.get("arxiv_id") or "").strip()
-    row = db.query(BufferPaper).filter(BufferPaper.arxiv_id == arxiv_id).first()
-    if row is None:
-        row = BufferPaper(arxiv_id=arxiv_id, status=BUFFER_PENDING)
-        db.add(row)
-    row.title = str(data.get("title") or "")[:1000]
-    row.abstract = str(data.get("abstract") or "")
-    row.authors_json = json.dumps(data.get("authors") or [], ensure_ascii=False)
-    row.categories_json = json.dumps(data.get("categories") or [], ensure_ascii=False)
-    row.published = data.get("published")
-    if match_score:
-        row.match_score = float(match_score)
-    if suggested_path:
-        row.suggested_path = suggested_path[:1024]
-    if matched_node_id:
-        row.matched_node_id = int(matched_node_id)
-    if screen_reason:
-        row.screen_reason = str(screen_reason)[:2000]
-    if search_run_id:
-        row.search_run_id = int(search_run_id)
-    row.source = source
-    row.updated_at = _utcnow()
-    db.commit()
-    db.refresh(row)
-    return row
-
-
-def list_buffer(db: Session, *, status: str = BUFFER_PENDING, q: Optional[str] = None,
-                limit: int = 200) -> List[BufferPaper]:
-    query = db.query(BufferPaper)
-    if status and status != "all":
-        query = query.filter(BufferPaper.status == status)
-    keyword = (q or "").strip()
-    if keyword:
-        like = "%{}%".format(keyword)
-        query = query.filter((BufferPaper.title.ilike(like)) | (BufferPaper.abstract.ilike(like))
-                             | (BufferPaper.arxiv_id.ilike(like)))
-    return (query.order_by(BufferPaper.match_score.desc(), BufferPaper.id.desc())
-            .limit(max(1, int(limit))).all())
-
-
-def get_buffer(db: Session, buffer_id: int) -> Optional[BufferPaper]:
-    return db.get(BufferPaper, buffer_id)
-
-
-def set_buffer_screening(db: Session, row: BufferPaper, *, score: float, path: str,
-                         matched_node_id: Optional[int], reason: str) -> BufferPaper:
-    row.match_score = float(score)
-    row.suggested_path = (path or "")[:1024]
-    row.matched_node_id = matched_node_id
-    row.screen_reason = (reason or "")[:2000]
-    row.updated_at = _utcnow()
-    db.commit()
-    return row
-
-
-def set_buffer_summary(db: Session, row: BufferPaper, *, summary_text: str,
-                       stats: Optional[Dict[str, Any]], verified_path: str,
-                       verify_reason: str, fit: bool) -> BufferPaper:
-    row.summary_text = summary_text or ""
-    row.summary_stats_json = json.dumps(stats or {}, ensure_ascii=False)
-    row.verified_path = (verified_path or "")[:1024]
-    row.verify_reason = (verify_reason or "")[:2000]
-    if fit:
-        row.status = BUFFER_PENDING
-    row.updated_at = _utcnow()
-    db.commit()
-    return row
-
-
-def set_buffer_status(db: Session, row: BufferPaper, status: str) -> BufferPaper:
-    row.status = status
-    row.updated_at = _utcnow()
-    db.commit()
-    return row
-
-
-# 提升入库进行中的状态：批量丢弃要跳过，避免与后台线程竞态
-def reject_buffer_many(db: Session, ids: Sequence[int]) -> Dict[str, Any]:
-    """批量丢弃待读缓冲区条目（一次勾选多篇场景）。
-
-    只处理传入的 id：存在的记录置为 rejected；不存在的与提升中的 id 一律跳过。
-    返回 {rejected, rejected_ids, skipped_ids}。
-    """
-    wanted: List[int] = []
-    for value in ids or []:
-        try:
-            item = int(value)
-        except (TypeError, ValueError):
-            continue
-        if item not in wanted:
-            wanted.append(item)
-    rows = db.query(BufferPaper).filter(BufferPaper.id.in_(wanted)).all() if wanted else []
-    found = {row.id: row for row in rows}
-    rejected_ids: List[int] = []
-    skipped_ids: List[int] = [item for item in wanted if item not in found]
-    for item in wanted:
-        row = found.get(item)
-        if row is None:
-            continue
-        if row.promote_state in ("queued", "running"):
-            skipped_ids.append(row.id)
-            continue
-        row.status = BUFFER_REJECTED
-        row.updated_at = _utcnow()
-        rejected_ids.append(row.id)
-    if rejected_ids:
-        db.commit()
-    return {"rejected": len(rejected_ids), "rejected_ids": rejected_ids,
-            "skipped_ids": skipped_ids}
-
-
-def buffer_stats(db: Session) -> Dict[str, int]:
-    counts = {BUFFER_PENDING: 0, BUFFER_READ: 0, BUFFER_REJECTED: 0}
-    for status, total in (db.query(BufferPaper.status, func.count(BufferPaper.id))
-                          .group_by(BufferPaper.status).all()):
-        counts[status] = int(total)
-    counts["total"] = sum(counts.values())
-    return counts
-
-
-# ---------------------------------------------------------------- 检索 run（异步任务状态）
-SEARCH_LOG_TAIL = 300
-
-
-def create_search_run(db: Session, request: Dict[str, Any]) -> SearchRun:
-    run = SearchRun(status="running", stage="search",
-                    request_json=json.dumps(request, ensure_ascii=False), log_json="[]",
-                    counters_json=json.dumps({"found": 0, "screened": 0, "summarized": 0,
-                                              "buffered": 0, "dropped": 0}, ensure_ascii=False))
-    db.add(run)
-    db.commit()
-    db.refresh(run)
-    return run
-
-
-# 两类异步 run（SearchRun / RelatedRun）共享同一套日志与状态更新口径：
-# 字段同名（logs/stage/status/error/counters_json/finished_at），用鸭子类型泛化，避免逻辑漂移。
+# 长任务的进度日志统一走这里：写满即截尾，字段口径与前端进度面板对齐。
 def _append_run_log(db: Session, target: Any, message: str, *, level: str = "info",
                     arxiv_id: str = "", **structured: Any) -> None:
     from .progress import normalize
     logs = target.logs
     logs.append(normalize({"ts": _utcnow().strftime("%H:%M:%S"), "level": level,
                  "message": str(message)[:400], "arxiv_id": arxiv_id, **structured}))
-    target.log_json = json.dumps(logs[-SEARCH_LOG_TAIL:], ensure_ascii=False)
+    target.log_json = json.dumps(logs[-RUN_LOG_TAIL:], ensure_ascii=False)
     db.commit()
 
 
@@ -1010,42 +870,6 @@ def _update_run_record(db: Session, run: Any, *, stage: Optional[str] = None,
         run.finished_at = _utcnow()
     db.commit()
     return run
-
-
-def log_search(db: Session, run: SearchRun, message: str, *, level: str = "info",
-               arxiv_id: str = "", **structured: Any) -> None:
-    _append_run_log(db, run, message, level=level, arxiv_id=arxiv_id, **structured)
-
-
-def update_search_run(db: Session, run: SearchRun, *, stage: Optional[str] = None,
-                      status: Optional[str] = None, error: Optional[str] = None,
-                      counters: Optional[Dict[str, Any]] = None,
-                      finished: bool = False) -> SearchRun:
-    return _update_run_record(db, run, stage=stage, status=status, error=error,
-                              counters=counters, finished=finished)
-
-
-def get_search_run(db: Session, run_id: int) -> Optional[SearchRun]:
-    return db.get(SearchRun, run_id)
-
-
-def recent_search_runs(db: Session, limit: int = 10) -> List[SearchRun]:
-    return (db.query(SearchRun).order_by(SearchRun.id.desc()).limit(max(1, int(limit))).all())
-
-
-def search_run_payload(run: SearchRun, *, log_tail: int = 80) -> Dict[str, Any]:
-    from .progress import normalize
-    return {
-        "id": run.id, "status": run.status, "stage": run.stage,
-        "counters": run.counters, "error": run.error,
-        "cancel_requested": bool(run.cancel_requested),
-        "started_at": _iso(run.started_at), "finished_at": _iso(run.finished_at),
-        "request": run.request,
-        "logs": [normalize(row) for row in run.logs[-max(1, int(log_tail)):]],
-                "stages_done": list({row.get("stage") for row in map(normalize, run.logs)
-                                     if row.get("status") == "done" and row.get("stage")}),
-        "log_total": len(run.logs),
-    }
 
 
 # ---------------------------------------------------------------- 智能关联检索（Related Work）
@@ -1220,8 +1044,7 @@ def related_counts(db: Session, source_paper_id: int) -> Dict[str, int]:
     return counts
 
 
-def _related_candidate_payload(row: RelatedCandidate, in_library: bool,
-                               in_buffer: bool) -> Dict[str, Any]:
+def _related_candidate_payload(row: RelatedCandidate, in_library: bool) -> Dict[str, Any]:
     return {
         "id": row.id, "arxiv_id": row.arxiv_id, "title": row.title,
         "abstract": row.abstract, "authors": row.authors, "categories": row.categories,
@@ -1236,30 +1059,24 @@ def _related_candidate_payload(row: RelatedCandidate, in_library: bool,
         "retryable": bool(row.processing_error or row.relevance == "uncertain"),
         "promote_state": row.promote_state, "promote_error": row.promote_error,
         "promoted_paper_id": row.promoted_paper_id,
-        "in_library": bool(in_library), "in_buffer": bool(in_buffer),
+        "in_library": bool(in_library),
         "created_at": _iso(row.created_at), "updated_at": _iso(row.updated_at),
     }
 
 
 def related_candidates_payload(db: Session, source_paper_id: int, *,
                                include_discarded: bool = False) -> List[Dict[str, Any]]:
-    """候选列表（默认只给强相关待处理/已入库的）+ 是否已在库/缓冲区的标志。"""
+    """候选列表（默认只给强相关待处理/已入库的）+ 是否已在库的标志。"""
     rows = list_related_candidates(db, source_paper_id, include_discarded=include_discarded)
     arxiv_ids = [r.arxiv_id for r in rows]
     in_library: set = set()
-    in_buffer: set = set()
     if arxiv_ids:
         in_library = {value[0] for value in
                       db.query(Paper.arxiv_id).filter(Paper.arxiv_id.in_(arxiv_ids)).all()}
-        in_buffer = {value[0] for value in
-                     db.query(BufferPaper.arxiv_id)
-                     .filter(BufferPaper.arxiv_id.in_(arxiv_ids)).all()}
-    return [_related_candidate_payload(row, row.arxiv_id in in_library,
-                                       row.arxiv_id in in_buffer) for row in rows]
+    return [_related_candidate_payload(row, row.arxiv_id in in_library) for row in rows]
 
 
 def related_candidate_payload_single(db: Session, row: RelatedCandidate) -> Dict[str, Any]:
     """单条候选 payload（前端轮询 promote 状态时用）。"""
     in_library = db.query(Paper).filter(Paper.arxiv_id == row.arxiv_id).count() > 0
-    in_buffer = db.query(BufferPaper).filter(BufferPaper.arxiv_id == row.arxiv_id).count() > 0
-    return _related_candidate_payload(row, in_library, in_buffer)
+    return _related_candidate_payload(row, in_library)

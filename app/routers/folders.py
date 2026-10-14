@@ -1,7 +1,7 @@
 """文件夹路由：树形展示与增删改。
 
-删除文件夹时，其子文件夹与论文上移到父级（顶层则移入 Inbox），不做级联删除，
-避免误删论文。Inbox 为系统默认文件夹，禁止删除。
+删除文件夹时，其子文件夹与论文上移到父级；顶层文件夹删除后论文回到"全部论文"。
+不做级联删除，避免误删论文。
 
 方向文件夹通过稳定节点 ID 关联分类；移动、改名、删除统一维护子树路径和唯一归属。
 """
@@ -29,11 +29,10 @@ def _paper_counts(db: Session) -> Dict[int, int]:
     return counts
 
 
-def _build_tree(folders: List[Folder], counts: Dict[int, int], aliases=None, inbox_id=None) -> List[schemas.FolderNode]:
+def _build_tree(folders: List[Folder], counts: Dict[int, int], aliases=None) -> List[schemas.FolderNode]:
     nodes = {
         f.id: schemas.FolderNode(
             id=f.id, name=f.name, parent_id=f.parent_id,
-            system_kind="inbox" if f.id == inbox_id else "",
             paper_count=counts.get(f.id, 0), direction_node_id=f.direction_node_id,
             children=[],
         )
@@ -76,7 +75,7 @@ def _is_descendant(db: Session, node_id: int, ancestor_id: int) -> bool:
 def list_folders(db: Session = Depends(database.get_db)):
     folders = db.query(Folder).all()
     aliases = translation.node_aliases(db, settings_store.get_output_language(db))
-    return _build_tree(folders, _paper_counts(db), aliases, database.ensure_inbox(db).id)
+    return _build_tree(folders, _paper_counts(db), aliases)
 
 
 @router.post("", response_model=schemas.FolderOut, status_code=201)
@@ -103,8 +102,6 @@ def update_folder(folder_id: int, body: schemas.FolderUpdate,
         raise HTTPException(status_code=404, detail="文件夹不存在")
 
     fields = body.model_fields_set
-    if folder.id == database.ensure_inbox(db).id:
-        raise HTTPException(status_code=400, detail="系统 Inbox 不能移动或改名")
     name = body.name if "name" in fields and body.name is not None else folder.name
     parent_id = body.parent_id if "parent_id" in fields else folder.parent_id
     try:
@@ -121,8 +118,6 @@ def delete_folder(folder_id: int, db: Session = Depends(database.get_db)):
     folder = db.get(Folder, folder_id)
     if folder is None:
         raise HTTPException(status_code=404, detail="文件夹不存在")
-    if folder.id == database.ensure_inbox(db).id:
-        raise HTTPException(status_code=400, detail="Inbox 为系统默认文件夹，不能删除")
     try:
         knowledge_store.delete_folder(db, folder)
     except ValueError as exc:

@@ -45,17 +45,11 @@ _DEFAULT_KNOWLEDGE: Dict[str, Any] = {
     "store_reasoning": False,
     "auto_run_on_import": False,
     "reuse_artifacts": True,
-    "discovery_batch_size": 8,
-    "discovery_min_score": 0.55,
-    "discovery_max_summarize": 12,
-    "discovery_default_days": 14,
-    # 智能关联检索（Related Work -> 候选论文）
-    "related_max_seeds": 20,
+    # 智能关联检索（Related Work / 参考文献 -> 按标题取候选 -> 相关性判定）
+    # 只这两个可调项：每个标题向 arXiv 取几个模糊候选、判定调用每批几篇。
+    # 有意不提供"种子数 / 候选数 / 保留数"上限——引用里提到多少就处理多少。
     "related_title_matches": 3,
-    "related_topic_queries": 6,
-    "related_max_candidates": 120,
     "related_batch_size": 8,
-    "related_max_results": 30,
 }
 
 
