@@ -110,7 +110,7 @@ The installer picks an environment automatically, in this order:
 
 - **[uv](https://docs.astral.sh/uv/) available (recommended)**: fastest, and it provisions Python 3.12 for you;
 - **Running from source**: without uv, your current Python (3.12+) is used;
-- **Desktop app**: without uv, a system `python3.12` is required — if neither exists, the dialog asks you to install uv first.
+- **Desktop app**: without uv, the installer searches common locations (Homebrew, python.org, …) for Python 3.10–3.13 — macOS's bundled `/usr/bin/python3` (3.9) is skipped by the version check; if nothing qualifies, the dialog tells you to install uv or Python 3.12.
 
 On a network in mainland China, enable **Use China mirror when installing the engine** in **Settings → PDF full-text translation** (Tsinghua mirror) to speed things up. The first translation run additionally downloads layout-analysis models and fonts — that is expected.
 

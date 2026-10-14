@@ -4,11 +4,14 @@ pdf2zh_next 依赖很重（onnxruntime / 版面分析模型等），不进主程
 而是按需装进独立虚拟环境：``<资料目录>/pdftranslate/venv``。
 
 安装方式优先级（与 zotero-pdf2zh 的 env_tool=auto 一致）：
-  1. uv（PATH 里有就用，最快，且能自动准备 Python 3.12）
+  1. uv（PATH 或常见安装位置里有就用，最快，且能自动准备 Python 3.12）
   2. 当前解释器 python -m venv + pip（源码运行模式）
-桌面打包模式下 sys.executable 不是真 Python，没 uv 时会给出明确报错。
+  3. 桌面打包模式找系统 Python——必须做版本预检：桌面应用 PATH 很干净，
+     which("python3") 命中的往往是 /usr/bin/python3（macOS 自带 3.9），
+     直接拿去装会在 pip 解析时报一堆看不懂的错。
 """
 
+import glob
 import logging
 import os
 import re
@@ -25,8 +28,18 @@ PACKAGE_SPEC = "pdf2zh_next>=2.9.0,<3.0.0"
 # bitstring 5.0 移除了 babeldoc 仍在用的 BitStream，必须钉在 4.x（与 zotero-pdf2zh 一致）
 EXTRA_PACKAGES = ["pypdf", "bitstring<5"]
 PYTHON_VERSION = "3.12"
+# pdf2zh_next 的 requires-python：>=3.10,<3.14（3.14 太新，/usr/bin/python3 的 3.9 太旧）
+MIN_PY = (3, 10)
+MAX_PY = (3, 14)
 # 国内镜像（pip / uv 通用），可在设置中开启
 MIRROR_INDEX = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+# 桌面应用从 Finder 启动时 PATH 只有 /usr/bin:/bin 等，Homebrew / 官方安装器
+# 装的东西都不在上面，要主动探这些位置。
+_EXTRA_BIN_DIRS = [
+    "/opt/homebrew/bin", "/usr/local/bin",
+    os.path.expanduser("~/.local/bin"), os.path.expanduser("~/.cargo/bin"),
+]
 
 _LOCK = threading.Lock()
 _STATE = {
@@ -143,6 +156,66 @@ def _install_with_python(executable: str, root: str, mirror: bool) -> None:
     _run_step(pip_cmd + [PACKAGE_SPEC] + EXTRA_PACKAGES)
 
 
+def _which_extended(name: str):
+    """PATH 找不到时，再探桌面应用 PATH 之外的常见安装位置。"""
+    found = shutil.which(name)
+    if found:
+        return found
+    for directory in _EXTRA_BIN_DIRS:
+        path = os.path.join(directory, name)
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def _python_version(executable: str):
+    """读候选解释器的 (major, minor)；跑不起来返回 None。"""
+    try:
+        out = subprocess.run(
+            [executable, "-c", "import sys; print('%d.%d' % sys.version_info[:2])"],
+            capture_output=True, text=True, timeout=15)
+        parts = (out.stdout or "").strip().split(".")
+        return (int(parts[0]), int(parts[1]))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _find_system_python() -> str:
+    """找版本合格的系统 Python：版本名优先，裸 python3 必须过版本检查。"""
+    candidates = []
+    for name in ("python3.12", "python3.13", "python3.11", "python3.10", "python3"):
+        path = _which_extended(name)
+        if path:
+            candidates.append(path)
+    # python.org 官方安装器的框架目录（Finder 启动时同样不在 PATH 上）
+    candidates.extend(sorted(
+        glob.glob("/Library/Frameworks/Python.framework/Versions/3.*/bin/python3"),
+        reverse=True))
+    seen = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        version = _python_version(path)
+        if version and MIN_PY <= version < MAX_PY:
+            return path
+        _append_log("跳过 {}（版本 {}，需要 >=3.10 且 <3.14）".format(
+            path, "{}.{}".format(*version) if version else "未知"))
+    return ""
+
+
+def _pick_python() -> str:
+    """没 uv 时选建 venv 的解释器：源码模式优先当前解释器，否则找系统 Python。"""
+    if not getattr(sys, "frozen", False) and MIN_PY <= sys.version_info[:2] < MAX_PY:
+        return sys.executable
+    found = _find_system_python()
+    if not found:
+        raise RuntimeError(
+            "未找到可用的 Python（pdf2zh_next 需要 >=3.10 且 <3.14）：请安装 uv "
+            "（https://docs.astral.sh/uv/）或 Python 3.12（如 brew install python@3.12）后重试")
+    return found
+
+
 def install(use_mirror: bool = False) -> None:
     """同步安装（调用方负责放后台线程）；幂等：装好了就直接返回。"""
     with _LOCK:
@@ -156,17 +229,12 @@ def install(use_mirror: bool = False) -> None:
             return
         if os.path.isdir(root):
             shutil.rmtree(root, ignore_errors=True)
-        uv = shutil.which("uv")
+        uv = _which_extended("uv")
         if uv:
             _append_log("使用 uv 创建环境…")
             _install_with_uv(uv, root, use_mirror)
         else:
-            executable = sys.executable
-            if getattr(sys, "frozen", False):
-                found = shutil.which("python3.12") or shutil.which("python3")
-                if not found:
-                    raise RuntimeError("未找到可用的 Python/uv：请安装 uv（https://docs.astral.sh/uv/）后重试")
-                executable = found
+            executable = _pick_python()
             _append_log("使用 {} 创建环境…".format(executable))
             _install_with_python(executable, root, use_mirror)
         if not os.path.isfile(engine_bin(root)):
