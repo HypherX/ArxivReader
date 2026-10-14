@@ -55,6 +55,94 @@ class TranslationCancelled(Exception):
     """用户请求取消：进程已被杀。"""
 
 
+# ------------------------------------------------------------ 子进程「关闭思考」补丁
+# 翻译是高频小调用，思考只拖慢速度、白烧 token。pdf2zh_next 只有写死官方端点的
+# DeepSeek 服务暴露 thinking 开关；OpenAICompatible 的 extra_body 是私有字段，
+# config.toml 设不进去。引擎 venv 由我们独占，写一份 sitecustomize.py 进去是
+# 侵入最小的注入方式（venv 内任何 python 进程启动时自动执行）。
+_SITECUSTOMIZE = '''"""ArxivReader 注入：全文翻译默认关闭模型思考。"""
+
+
+def _arxivr_extra_body(model):
+    # 与主程序同一口径：模型名带 deepseek 走 thinking.type，其余走 enable_thinking
+    if "deepseek" in (model or "").lower():
+        return {"thinking": {"type": "disabled"}}
+    return {"enable_thinking": False}
+
+
+try:
+    from pdf2zh_next.translator.translator_impl.openai import OpenAITranslator
+
+    _arxivr_openai_init = OpenAITranslator.__init__
+
+    def _arxivr_openai_patched(self, settings, rate_limiter):
+        _arxivr_openai_init(self, settings, rate_limiter)
+        if getattr(self, "extra_body", None):
+            return  # 引擎自己已设置（如 DeepSeek 服务的 thinking 开关），不覆盖
+        extra = _arxivr_extra_body(getattr(self, "model", ""))
+        self.extra_body = extra
+        self.add_cache_impact_parameters("extra_body", extra)
+        self.options["extra_body"] = extra
+
+    OpenAITranslator.__init__ = _arxivr_openai_patched
+except Exception:
+    pass  # 补丁失败不应影响翻译本体
+
+try:
+    from pdf2zh_next.translator.translator_impl.siliconflow import SiliconFlowTranslator
+
+    _arxivr_sf_init = SiliconFlowTranslator.__init__
+
+    def _arxivr_sf_patched(self, settings, rate_limiter):
+        _arxivr_sf_init(self, settings, rate_limiter)
+        # 硅基流动原生开关：默认不发参数（由服务端决定），强制发 enable_thinking=false
+        self.enable_thinking = False
+        self.send_enable_thinking_param = True
+        self.add_cache_impact_parameters("enable_thinking", False)
+        self.add_cache_impact_parameters("send_enable_thinking_param", True)
+
+    SiliconFlowTranslator.__init__ = _arxivr_sf_patched
+except Exception:
+    pass  # 同上
+'''
+
+_purelib_cache = ""
+
+
+def _engine_purelib() -> str:
+    """引擎 venv 的 site-packages 路径（问 venv 里的解释器，跨平台）。"""
+    global _purelib_cache
+    if _purelib_cache:
+        return _purelib_cache
+    try:
+        out = subprocess.run(
+            [env_mod.venv_python(), "-c",
+             "import sysconfig; print(sysconfig.get_path('purelib'))"],
+            capture_output=True, text=True, timeout=30)
+        lines = (out.stdout or "").strip().splitlines()
+        _purelib_cache = lines[-1].strip() if lines else ""
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("读取引擎 site-packages 路径失败：%s", exc)
+    return _purelib_cache
+
+
+def _ensure_runtime_patch() -> None:
+    """把 sitecustomize.py 写进引擎 venv（内容一致则跳过）；失败不阻断翻译。"""
+    purelib = _engine_purelib()
+    if not purelib:
+        return
+    target = os.path.join(purelib, "sitecustomize.py")
+    try:
+        if os.path.isfile(target):
+            with open(target, "r", encoding="utf-8") as fh:
+                if fh.read() == _SITECUSTOMIZE:
+                    return
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write(_SITECUSTOMIZE)
+    except OSError as exc:
+        logger.warning("写入引擎补丁失败：%s", exc)
+
+
 def _toml_value(value) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -347,6 +435,7 @@ def run_translation(input_path: str, service: str, creds: dict, options: dict,
         raise ValueError("不支持的翻译服务：{}".format(service))
     if not os.path.isfile(env_mod.engine_bin()):
         raise RuntimeError("pdf2zh_next 尚未安装，请先在设置或翻译弹窗中安装翻译引擎")
+    _ensure_runtime_patch()
     os.makedirs(work_dir, exist_ok=True)
     config_path = os.path.join(work_dir, "config.toml")
     build_config_toml(config_path, service, creds, options)
