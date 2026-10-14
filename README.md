@@ -59,14 +59,13 @@
 
 | 平台 | 文件 |
 |---|---|
-| 🍎 Apple Silicon（M 系列） | `ArxivReader-x.y.z-macOS-arm64.zip` |
-| 🍎 Intel Mac | `ArxivReader-x.y.z-macOS-x64.zip` |
-| 🪟 Windows x64 | `ArxivReader-x.y.z-Windows-x64.zip` |
+| 🍎 Apple Silicon（M 系列） | `ArxivReader-macOS-arm64.zip` |
 
 - **macOS**：解压后把 `ArxivReader.app` 拖进「应用程序」，双击打开。若提示「无法验证开发者」，到 **系统设置 → 隐私与安全性** 点「仍要打开」即可，无需关闭系统安全功能。
-- **Windows**：解压后保留文件夹内全部文件，双击 `ArxivReader.exe`。若提示缺少 WebView2，按提示安装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) 后重新打开。**不需要安装 Python。**
+- **Windows**：解压后保留文件夹内全部文件，双击 `ArxivReader.exe`。
 
 > 构建包未做签名与公证，首次启动的系统提示属于正常现象。每个压缩包都附带 `.sha256` 校验文件。
+> 目前我们只构建了 M 系列芯片的 Mac 版本，其他平台可以自行构建。
 
 ### 方式二：从源码运行（浏览器打开）
 
