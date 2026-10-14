@@ -1,6 +1,8 @@
 # ArxivReader 运行时依赖
 # 安装： python3 -m pip install -r requirements.txt
 # 桌面运行及构建环境：Python 3.12
+# 注意：「全文翻译」引擎（pdf2zh_next）依赖较重，不随主程序安装——
+# 首次在应用内点「安装引擎」按需下载到独立目录（见 README「全文翻译引擎」一节）。
 
 fastapi>=0.110
 uvicorn[standard]>=0.27
