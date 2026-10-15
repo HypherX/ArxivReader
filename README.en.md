@@ -23,7 +23,7 @@
 |---|---|
 | 🔗 **arXiv in one click** | Paste a link or an ID such as `2401.12345`; the PDF is downloaded and the full body extracted. |
 | 📤 **Local PDF upload** | Drop PDFs from your disk. Files are fingerprinted, so uploading the same PDF twice is detected. |
-| 🧲 **Citation mining** | Read the paper's Related Work and References, fuzzy-search every title mentioned there on arXiv, drop titles whose match score is below 0.7, judge relevance against the current paper from each abstract (no full-text summarizing), and keep only candidates scoring above 0.6 for you to review; strong matches can be promoted into full reading. Nothing is capped — as many citations as the paper lists. |
+| 🧲 **Citation mining** | Read the paper's Related Work and References, fuzzy-search every title mentioned there on arXiv, drop titles whose match score is below 0.7, judge relevance against the current paper from each abstract (no full-text summarizing), and keep only candidates scoring above 0.6 for you to review. Adding a candidate only downloads it into All papers; summary, classification, deep reading and relationships stay separate. Nothing is capped — as many citations as the paper lists. |
 
 ### 📖 Reading and translation
 

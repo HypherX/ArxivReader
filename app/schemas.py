@@ -266,6 +266,7 @@ class RelatedCandidateOut(BaseModel):
     promote_state: str = ""
     promote_error: str = ""
     promoted_paper_id: Optional[int] = None
+    library_paper_id: Optional[int] = None
     in_library: bool = False
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
@@ -282,7 +283,7 @@ class RelatedViewOut(BaseModel):
 
 
 class RelatedPromoteOut(BaseModel):
-    """候选「加入详细阅读」：后台执行时用 promote_state 轮询。"""
+    """候选「加入文献库」：后台下载时用 promote_state 轮询。"""
 
     candidate_id: int
     promote_state: str

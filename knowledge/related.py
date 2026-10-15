@@ -42,7 +42,6 @@ STAGE_TITLES_EN = {
     "collect": "Collect source material", "extract": "Extract citation titles",
     "search": "Fuzzy arXiv search", "judge": "Judge relevance from abstracts",
 }
-RELATED_PIPELINE_STEPS: Tuple[str, ...] = ("tree", "deep", "graph")
 _RELEVANCE = {"strong", "related", "uncertain", "unrelated"}
 _RETAIN_SCORE_FLOOR = 0.6      # 相关度高于此值才保留给用户筛选，其余按不相关丢弃
 _EXTRACT_BUDGET = 10000
@@ -551,24 +550,23 @@ def recover_interrupted(db: Session) -> None:
     db.commit()
 
 
-# ---------------------------------------------------------------- 候选 -> 正式库（加入详细阅读）
-def promote_related_candidate(db: Session, row: RelatedCandidate, *,
-                              settings: Any = None,
-                              trigger_pipeline: bool = True) -> Dict[str, Any]:
-    """把强相关候选迁入正式库：下载全文 -> 建 Paper -> 预写 summary 产物 -> 触发知识网络。
+# ---------------------------------------------------------------- 候选 -> 文献库（只入库，不跑阅读流程）
+def promote_related_candidate(db: Session, row: RelatedCandidate) -> Dict[str, Any]:
+    """把候选加入文献库：下载全文并建成只属于「全部论文」的 Paper。
 
-    流程衔接的关键：候选在检索阶段已有 quick_summary，这里把它预写为 paper_artifacts
-    的 summary 产物，再按 `tree -> deep -> graph` 运行 pipeline，
-    因此「跳过 summary 步骤」与现有存储/图谱能力完全复用（幂等、可断点续跑）。
+    不预写总结、不跑分类 / 精读 / 关系。阅读动作由用户之后在论文里单独触发。
+    库里已有同一 arXiv id 时只关联现有记录，不改它的文件夹，也不重复下载。
     """
-    settings = settings or settings_store.get_llm_settings(db)
     existing = db.query(Paper).filter(Paper.arxiv_id == row.arxiv_id).first()
     if existing is None:
         meta = arxiv_service.fetch_metadata(row.arxiv_id)
-        # 先不落任何文件夹：提升后只属于"全部论文"，tree 步骤若跑过会自动移入方向文件夹
         dest_dir = os.path.join(get_pdf_dir(), arxiv_service.safe_dirname(arxiv_service.UNFILED_DIR))
         pdf_path = arxiv_service.download_pdf(meta, dest_dir)
-        text = pdf_service.extract_text(str(pdf_path))
+        try:
+            text = pdf_service.extract_text(str(pdf_path))
+        except Exception as exc:  # noqa: BLE001  抽文本失败不阻断入库，与手动添加论文一致
+            logger.warning("关联候选全文抽取失败（%s）：%s", row.arxiv_id, str(exc)[:300])
+            text = ""
         existing = Paper(arxiv_id=meta.arxiv_id, title=meta.title or row.title,
                          authors_json=json.dumps(meta.authors or row.authors, ensure_ascii=False),
                          abstract=meta.abstract or row.abstract,
@@ -578,38 +576,16 @@ def promote_related_candidate(db: Session, row: RelatedCandidate, *,
                          pdf_url=meta.pdf_url, pdf_path=str(pdf_path), folder_id=None,
                          full_text=text)
         db.add(existing)
-        db.commit()
-        db.refresh(existing)
-    if (row.summary_text or "").strip() and store.get_artifact(db, existing.id, store.ARTIFACT_SUMMARY) is None:
-        stats = row.stats or {}
-        store.upsert_artifact(db, existing.id, store.ARTIFACT_SUMMARY, row.summary_text,
-                              stats=stats, model=str(stats.get("model") or ""),
-                              reasoning_effort=stats.get("reasoning_effort"))
+        db.flush()
+        store.move_paper_to_folder(db, existing, None, commit=False)
     row.status = store.RELATED_PROMOTED
-    row.promote_state = "running" if trigger_pipeline else "done"
+    row.promote_state = "done"
     row.promote_error = ""
     row.promoted_paper_id = existing.id
     row.updated_at = _utcnow()
     db.commit()
-
-    from . import pipeline as knowledge_pipeline
-    artifact = store.get_artifact(db, existing.id, store.ARTIFACT_SUMMARY)
-    cfg = runtime_config(settings, settings_store.get_harness_settings(db))
-    steps = RELATED_PIPELINE_STEPS if knowledge_pipeline._current_artifact(artifact, cfg) else ("summary",) + RELATED_PIPELINE_STEPS
-    result: Dict[str, Any] = {"paper_id": existing.id, "arxiv_id": existing.arxiv_id,
-                              "title": existing.title, "steps": list(steps)}
-    if trigger_pipeline:
-        outcome = knowledge_pipeline.run_pipeline(db, existing, steps=steps,
-                                                  settings=settings)
-        result["pipeline"] = {"run_id": outcome.run_id, "status": outcome.status,
-                              "steps": outcome.steps}
-        row.promote_state = "done" if outcome.status == "done" else "failed"
-        if outcome.status != "done":            # 已入库但流程未完成：把原因留给前端提示
-            row.promote_error = "已入库，但知识网络流程{}：{}".format(
-                "被终止" if outcome.status == "cancelled" else "未完成",
-                (outcome.error or "")[:300])
-        db.commit()
-    return result
+    db.refresh(existing)
+    return {"paper_id": existing.id, "arxiv_id": existing.arxiv_id, "title": existing.title}
 
 
 def _set_related_promote_state(db: Session, row: RelatedCandidate, state: str,
@@ -620,11 +596,19 @@ def _set_related_promote_state(db: Session, row: RelatedCandidate, state: str,
     db.commit()
 
 
-def start_related_promote_background(candidate_id: int, *,
-                                     trigger_pipeline: bool = True) -> str:
-    """后台「加入详细阅读」（下载全文 + 建 Paper + 跑知识网络）；返回初始状态。
+def _library_paper_for_candidate(db: Session, row: RelatedCandidate) -> Optional[Paper]:
+    """候选已经对应的库内论文；论文被删掉后返回 None，允许重新下载。"""
+    paper = db.get(Paper, row.promoted_paper_id) if row.promoted_paper_id else None
+    if paper is None:
+        paper = db.query(Paper).filter(Paper.arxiv_id == row.arxiv_id).first()
+    return paper
 
-    前端通过 `GET /api/related/candidates/{id}` 的 `promote_state` 轮询进度
+
+def start_related_promote_background(candidate_id: int) -> str:
+    """后台「加入文献库」（下载全文 + 建 Paper）；返回初始状态。
+
+    不调用模型，也不跑阅读步骤。前端通过
+    `GET /api/related/candidates/{id}` 的 `promote_state` 轮询进度
     （queued → running → done/failed，失败原因看 promote_error）。
     """
     db = database.SessionLocal()
@@ -633,11 +617,15 @@ def start_related_promote_background(candidate_id: int, *,
         row = store.get_related_candidate(db, candidate_id)
         if row is None:
             raise ValueError("候选记录不存在：id={}".format(candidate_id))
-        if row.status == store.RELATED_PROMOTED and row.promoted_paper_id and row.promote_state == "done":
-            return "done"
         if row.promote_state in ("queued", "running"):
             return row.promote_state
-        settings = settings_store.get_llm_settings(db)
+        if row.status == store.RELATED_PROMOTED and row.promote_state == "done":
+            linked = _library_paper_for_candidate(db, row)
+            if linked is not None:
+                if row.promoted_paper_id != linked.id:
+                    row.promoted_paper_id = linked.id
+                    db.commit()
+                return "done"
         _set_related_promote_state(db, row, "queued")
     finally:
         db.close()
@@ -649,9 +637,9 @@ def start_related_promote_background(candidate_id: int, *,
             if row is None:
                 return
             _set_related_promote_state(worker_db, row, "running")
-            promote_related_candidate(worker_db, row, trigger_pipeline=trigger_pipeline, settings=settings)
+            promote_related_candidate(worker_db, row)
         except Exception as exc:  # noqa: BLE001  失败写回状态，前端可见
-            logger.warning("关联候选提升入库失败（candidate=%s）：%s", candidate_id, str(exc)[:300])
+            logger.warning("关联候选加入文献库失败（candidate=%s）：%s", candidate_id, str(exc)[:300])
             try:
                 worker_db.rollback()
                 row = store.get_related_candidate(worker_db, candidate_id)

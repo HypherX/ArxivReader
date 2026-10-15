@@ -21,6 +21,17 @@ def _pick(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
+def readable_text(text: str) -> str:
+    """去掉 PDF 文字层里的 NUL 等控制符。
+
+    公式经常抽出 \\x00/\\x01。SQLite 的 length() 会在第一个 NUL 处截断，
+    部分下游也会把正文当成 C 字符串，所以入库和阅读前都先清掉。
+    """
+    if not text:
+        return ""
+    return "".join(ch if ch in "\n\t\r" or ord(ch) >= 32 else " " for ch in text)
+
+
 def _as_list(value: Any) -> List[str]:
     if value is None:
         return []
@@ -52,7 +63,7 @@ class PaperInput:
             abstract=str(_pick(obj, "abstract", "") or ""),
             categories=_as_list(_pick(obj, "categories")),
             published=_pick(obj, "published"),
-            full_text=str(_pick(obj, "full_text", "") or ""),
+            full_text=readable_text(str(_pick(obj, "full_text", "") or "")),
         )
 
     @property

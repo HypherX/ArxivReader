@@ -568,7 +568,7 @@ class RelatedCandidate(Base):
     relevance_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     relevance_reason: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
-    # 加入详细阅读的状态机：""/queued/running/done/failed
+    # 加入文献库的状态机：""/queued/running/done/failed
     promote_state: Mapped[str] = mapped_column(String(16), nullable=False, default="")
     promote_error: Mapped[str] = mapped_column(Text, nullable=False, default="")
     promoted_paper_id: Mapped[Optional[int]] = mapped_column(ForeignKey("papers.id"),
