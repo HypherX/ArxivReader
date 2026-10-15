@@ -13,6 +13,7 @@ import os
 import math
 import re
 import threading
+import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -261,23 +262,8 @@ def iter_related_events(db: Session, run: RelatedRun, *,
             yield _emit_stage("search", "running")
             collected = {}
             counters.update(raw_hits=0, duplicated=0, self_excluded=0, search_failed=0)
-            for seed in seeds:
-                check()
-                try:
-                    key = hashlib.sha256(json.dumps([seed["title"], seed["arxiv_id"], seed["authors"], per_seed],
-                                                    sort_keys=True).encode()).hexdigest()
-                    if key in search_cache:
-                        hits = [arxiv_search.SearchHit(**hit) for hit in search_cache[key]]
-                    else:
-                        hits = arxiv_search.search_reference(seed, max_results=per_seed, should_stop=check)
-                        search_cache[key] = [hit.as_dict() for hit in hits]
-                        store.update_related_run(db, run, counters=counters)
-                except Cancelled:
-                    raise
-                except Exception as exc:
-                    counters["search_failed"] += 1
-                    store.log_related(db, run, str(exc)[:300], level="error")
-                    continue
+
+            def absorb(seed, hits):
                 counters["raw_hits"] += len(hits)
                 for hit in hits:
                     hit.arxiv_id = arxiv_service.strip_version(hit.arxiv_id)
@@ -292,6 +278,96 @@ def iter_related_events(db: Session, run: RelatedRun, *,
                         old.match_score = max(old.match_score, hit.match_score)
                         continue
                     collected[hit.arxiv_id] = (hit, seed["title"])
+
+            def fetch_hits(seed, id_cache):
+                """单种子检索：优先缓存/批量 ID 结果；失败分类处理。"""
+                key = hashlib.sha256(json.dumps([seed["title"], seed["arxiv_id"], seed["authors"], per_seed],
+                                                sort_keys=True).encode()).hexdigest()
+                if key in search_cache:
+                    return [arxiv_search.SearchHit(**hit) for hit in search_cache[key]], False
+                hits = arxiv_search.search_reference(seed, max_results=per_seed,
+                                                     should_stop=check, id_cache=id_cache)
+                search_cache[key] = [hit.as_dict() for hit in hits]
+                store.update_related_run(db, run, counters=counters)
+                return hits, True
+
+            # 带 arXiv ID 的种子先一次性批量拉元信息：N 次单查变 ~1 次请求。
+            # 限流期每个请求都可能挂到超时，请求数直接决定整轮要多久。
+            id_cache = {}
+            id_seeds = [s["arxiv_id"] for s in seeds if s.get("arxiv_id")]
+            if id_seeds:
+                try:
+                    id_cache = arxiv_search.batch_fetch_by_ids(id_seeds, should_stop=check)
+                    counters["id_batch_fetched"] = len(id_cache)
+                except Cancelled:
+                    raise
+                except arxiv_search.SearchTransient as exc:
+                    counters["id_batch_fetched"] = 0
+                    store.log_related(db, run, choose(hcfg, "ID 批量检索暂不可用，逐条进行时可能变慢：",
+                                                      "Batch ID lookup unavailable, per-seed lookups may be slow: ")
+                                      + str(exc)[:120], level="warn")
+                    id_cache = None      # None = 退化为逐条单查（不拿空缓存挡路）
+                except Exception as exc:  # noqa: BLE001
+                    counters["id_batch_fetched"] = 0
+                    store.log_related(db, run, str(exc)[:300], level="error")
+                    id_cache = None
+
+            transient_seeds = []
+            for seed in seeds:
+                check()
+                try:
+                    hits, _ = fetch_hits(seed, id_cache)
+                except Cancelled:
+                    raise
+                except arxiv_search.SearchTransient as exc:
+                    counters["search_failed"] += 1
+                    transient_seeds.append(seed)
+                    store.log_related(db, run, choose(hcfg, "检索暂不可用（稍后自动重试）：",
+                                                      "Search temporarily unavailable (will retry): ")
+                                      + str(exc)[:160], level="warn")
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    counters["search_failed"] += 1
+                    store.log_related(db, run, str(exc)[:300], level="error")
+                    continue
+                absorb(seed, hits)
+
+            # 限流/超时失败的种子：冷却一轮后整体重试一次（原地重试只会延长限流）。
+            if transient_seeds:
+                counters["search_retried"] = len(transient_seeds)
+                store.log_related(db, run, choose(
+                    hcfg, "arXiv 限流，冷却 90 秒后重试 {} 条失败引用…".format(len(transient_seeds)),
+                    "Rate-limited by arXiv; retrying {} failed citations after a 90s cooldown…".format(len(transient_seeds))),
+                    level="warn")
+                deadline = time.time() + 90
+                while time.time() < deadline:
+                    check()
+                    time.sleep(min(2.0, deadline - time.time()))
+                retry_id_cache = id_cache
+                if retry_id_cache is None:
+                    try:
+                        retry_id_cache = arxiv_search.batch_fetch_by_ids(
+                            [s["arxiv_id"] for s in transient_seeds if s.get("arxiv_id")],
+                            should_stop=check)
+                    except Exception:  # noqa: BLE001
+                        retry_id_cache = None
+                for seed in transient_seeds:
+                    check()
+                    try:
+                        hits, _ = fetch_hits(seed, retry_id_cache)
+                    except Cancelled:
+                        raise
+                    except arxiv_search.SearchTransient:
+                        store.log_related(db, run, choose(hcfg, "仍被限流，放弃剩余重试",
+                                                          "Still rate-limited; giving up on the rest"),
+                                          level="warn")
+                        break          # 冷却都没缓过来，剩下的也不会好
+                    except Exception as exc:  # noqa: BLE001
+                        store.log_related(db, run, str(exc)[:300], level="error")
+                        continue
+                    counters["search_failed"] -= 1
+                    absorb(seed, hits)
+
             counters["found"] = len(collected)
             counters["deduplicated_hits"] = counters["raw_hits"] - len(collected) - counters["self_excluded"]
             selected = sorted(collected.values(), key=lambda pair: -pair[0].match_score)
