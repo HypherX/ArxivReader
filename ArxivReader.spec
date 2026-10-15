@@ -42,8 +42,8 @@ exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="ArxivReader", debug=F
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name="ArxivReader")
 if mac:
     app = BUNDLE(coll, name="ArxivReader.app", icon=icon,
-                 bundle_identifier="org.arxivreader.desktop", version="0.2.0",
+                 bundle_identifier="org.arxivreader.desktop", version="1.0.2",
                  info_plist={"NSHighResolutionCapable": True, "LSMinimumSystemVersion": "11.0",
-                             "CFBundleShortVersionString": "0.2.0", "NSAppTransportSecurity": {
+                             "CFBundleShortVersionString": "1.0.2", "NSAppTransportSecurity": {
                                  "NSAllowsLocalNetworking": True,
                                  "NSExceptionDomains": {"127.0.0.1": {"NSExceptionAllowsInsecureHTTPLoads": True}}}})

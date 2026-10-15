@@ -90,7 +90,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="ArxivReader", version="0.2.0", lifespan=lifespan,
+app = FastAPI(title="ArxivReader", version="1.0.2", lifespan=lifespan,
               docs_url=None if desktop_session.session else "/docs",
               redoc_url=None if desktop_session.session else "/redoc",
               openapi_url=None if desktop_session.session else "/openapi.json")
