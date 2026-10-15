@@ -14,6 +14,8 @@ import logging
 from pathlib import Path
 from typing import Union
 
+from harness.paper import readable_text
+
 logger = logging.getLogger(__name__)
 
 def extract_text(pdf_path: Union[str, Path]) -> str:
@@ -24,7 +26,7 @@ def extract_text(pdf_path: Union[str, Path]) -> str:
     with fitz.open(str(pdf_path)) as doc:
         for i, page in enumerate(doc, start=1):
             try:
-                page_text = page.get_text("text") or ""
+                page_text = readable_text(page.get_text("text") or "")
             except Exception as exc:  # noqa: BLE001  单页解析失败不阻断整体
                 logger.warning("第 %d 页抽取失败：%s", i, str(exc)[:200])
                 page_text = ""

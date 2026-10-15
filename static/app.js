@@ -1138,7 +1138,7 @@
   var STEP_TO_ARTIFACT = { summary: "summary", deep: "deep_reading" };
   var artifactView = "chat";        // chat | summary | deep_reading
   var artifactText = "";            // 当前展示的 Markdown 原文（供复制/新窗口）
-  var artifactPaperId = null, artifactVersion = null, artifactRequest = 0;
+  var artifactPaperId = null, artifactsReadyFor = null, artifactVersion = null, artifactRequest = 0;
 
   function setArtifactTabs(meta) {
     meta = meta || {};
@@ -1163,6 +1163,7 @@
   function loadPaperArtifacts(paper) {
     if (!paper) { setArtifactTabs({}); return Promise.resolve({}); }
     artifactPaperId = paper.id;
+    artifactsReadyFor = null;
     return api.get("/api/papers/" + paper.id + "/knowledge").then(function (data) {
       if (!state.currentPaper || state.currentPaper.id !== paper.id) return null;
       var meta = {};
@@ -1175,8 +1176,15 @@
       state.knowledge = { memberships: (data && data.memberships) || [], edges: (data && data.edges) || [] };
       setArtifactTabs(meta);
       renderAiActions(paper);
+      artifactsReadyFor = paper.id;
       return meta;
-    }).catch(function () { if (state.currentPaper && state.currentPaper.id === paper.id) setArtifactTabs({}); return {}; });
+    }).catch(function () {
+      if (state.currentPaper && state.currentPaper.id === paper.id) {
+        setArtifactTabs({});
+        artifactsReadyFor = paper.id;
+      }
+      return {};
+    });
   }
 
   function showChatView() {
@@ -1403,6 +1411,13 @@
   function runAiStep(step, force) {
     var paper = state.currentPaper;
     if (!paper) { toast(function () { return I18n.t("ui.7912dc9e9b8b"); }, "err"); return; }
+    if (artifactsReadyFor !== paper.id) {
+      loadPaperArtifacts(paper).then(function () {
+        if (!state.currentPaper || state.currentPaper.id !== paper.id) return;
+        runAiStep(step, force);
+      });
+      return;
+    }
     var missing = missingAiPrereq(step);
     if (missing) { toast(function () { return I18n.t(missing); }, "warn", 7000); return; }
     runPaperPipeline(paper, !!force, [step]);

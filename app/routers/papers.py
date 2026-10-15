@@ -1,7 +1,7 @@
 """论文路由：ArXiv 入库、本地 PDF 上传、列表检索、移动/编辑、PDF 与全文获取、删除。
 
 入库流程（POST /api/papers/from-arxiv）：
-  规范化 id -> 去重 -> 取元数据 -> 下载 PDF -> 抽取全文(超长截断) ->
+  规范化 id -> 去重 -> 取元数据 -> 下载 PDF -> 抽取全文 ->
   规则归档(未指定文件夹时) -> 落库
 本地上传（POST /api/papers/upload）：
   校验 PDF -> 内容哈希生成 local- 前缀 id -> 去重 -> 落盘 -> 抽取全文 -> 落库
@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from .. import arxiv_service, database, pdf_service, schemas
 from harness.config import get_pdf_dir
+from harness.paper import readable_text
 from ..models import LOCAL_ID_PREFIX, Folder, Paper
 from knowledge import store
 
@@ -275,8 +276,9 @@ def _pdf_file_or_404(paper: Paper) -> str:
 @router.get("/{paper_id}/text")
 def get_text(paper_id: int, db: Session = Depends(database.get_db)):
     paper = _get_paper_or_404(db, paper_id)
+    text = readable_text(paper.full_text or "")
     return {
         "arxiv_id": paper.arxiv_id,
-        "char_count": len(paper.full_text or ""),
-        "text": paper.full_text or "",
+        "char_count": len(text),
+        "text": text,
     }
