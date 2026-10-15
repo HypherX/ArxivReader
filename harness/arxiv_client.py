@@ -4,11 +4,32 @@ import threading
 from typing import Any, Callable, List, Optional
 
 import arxiv
+import requests
 
 from .cancel import Cancelled
 
 _LOCK = threading.Lock()
 _CLIENT = None
+
+# requests 默认完全无超时：arXiv 限流时会晾着连接不放（实测一个请求挂 60 秒以上），
+# 必须自己兜底；超时/连接错误在 arxiv 库的重试名单之外，会立刻抛给上层（正好快速失败）。
+_REQUEST_TIMEOUT = 20.0
+
+
+class _TimeoutSession(requests.Session):
+    """给每个请求补默认 timeout 的 Session（arxiv.Client 不接受 timeout 参数）。"""
+
+    def request(self, method: str, url: str, **kwargs: Any) -> Any:
+        kwargs.setdefault("timeout", _REQUEST_TIMEOUT)
+        return super().request(method, url, **kwargs)
+
+
+def make_client() -> arxiv.Client:
+    """构造带超时兜底的客户端。num_retries=2：429/503 不会在几秒内恢复，
+    原地重试只是继续挨打；真正的限流恢复由上层冷却后再整轮重试。"""
+    client = arxiv.Client(page_size=100, delay_seconds=3.0, num_retries=2)
+    client._session = _TimeoutSession()
+    return client
 
 
 def results(request: Any, *, client: Any = None,
@@ -27,7 +48,7 @@ def results(request: Any, *, client: Any = None,
         check()
         if client is None:
             if _CLIENT is None:
-                _CLIENT = arxiv.Client(page_size=100, delay_seconds=3.0, num_retries=3)
+                _CLIENT = make_client()
             client = _CLIENT
         output = []
         for item in client.results(request):

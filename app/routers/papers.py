@@ -65,6 +65,8 @@ def add_from_arxiv(body: schemas.PaperFromArxiv, db: Session = Depends(database.
         meta = arxiv_service.fetch_metadata(norm_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except arxiv_service.ArxivUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
     except Exception as exc:  # noqa: BLE001  网络异常等
         logger.warning("获取 ArXiv 元数据失败：%s", str(exc)[:300])
         raise HTTPException(status_code=502, detail="获取 ArXiv 元数据失败：%s" % str(exc)[:200])
