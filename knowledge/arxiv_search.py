@@ -26,7 +26,6 @@
     带摘要与 arXiv 链接），命中仍过同一套标题/作者验收门槛，只保留有 arXiv ID 的。
 """
 
-import html as html_lib
 import logging
 import re
 import time
@@ -36,7 +35,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import arxiv
 import requests
 
-from harness import arxiv_client
+from harness import arxiv_client, arxiv_page
 from harness.cancel import Cancelled
 
 logger = logging.getLogger(__name__)
@@ -93,13 +92,11 @@ def _run_query(request: Any, *, client: Any = None, should_stop: Any = None) -> 
 # ---------------------------------------------------------------- 限流兜底源（非 export API）
 _FALLBACK_TIMEOUT = 15.0
 _FALLBACK_UA = "ArxivReader/1.0 (+https://github.com/HypherX/ArxivReader)"
-_ABS_PAGE = "https://arxiv.org/abs/{}"
 _OPENALEX_SEARCH = "https://api.openalex.org/works"
 _OPENALEX_FIELDS = "id,title,publication_date,authorships,locations,abstract_inverted_index"
 # 新式 1706.03762 与老式 hep-th/9901001 两类 ID，容许版本号后缀。
 _ARXIV_URL_RE = re.compile(
     r"arxiv\.org/(?:abs|pdf)/([A-Za-z\-]+(?:\.[A-Z]{2})?/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?", re.I)
-_CITATION_RE = re.compile(r'<meta\s+name="(citation_[a-z_]+)"\s+content="([^"]*)"\s*/?>', re.I)
 
 
 def _stop_check(should_stop: Any) -> None:
@@ -163,24 +160,16 @@ def fetch_by_id_via_page(arxiv_id: str, *, should_stop: Any = None) -> Optional[
     """arXiv 主站 abs 页拿元信息（export API 限流时的同源兜底）。
 
     404 说明 ID 不存在，返回 None（不是暂时性故障，不占用重试名额）。"""
-    resp = _fallback_get(_ABS_PAGE.format(arxiv_id), source="arXiv abs 页",
-                         should_stop=should_stop, allow_not_found=True)
-    if resp is None:
+    try:
+        page = arxiv_page.fetch_abs_page_meta(arxiv_id, should_stop=should_stop,
+                                              timeout=_FALLBACK_TIMEOUT)
+    except arxiv_page.PageTransient as exc:
+        raise SearchTransient("arXiv abs 页暂不可用（{}）".format(exc))
+    if page is None:
         return None
-    metas: Dict[str, List[str]] = {}
-    for name, content in _CITATION_RE.findall(resp.text):
-        metas.setdefault(name, []).append(html_lib.unescape(content).strip())
-    title = (metas.get("citation_title") or [""])[0]
-    if not title:
-        raise SearchTransient("arXiv abs 页缺少 citation_title（页面结构变化？）")
-    date = (metas.get("citation_date") or [""])[0].replace("/", "-")
-    return SearchHit(
-        arxiv_id=re.sub(r"v\d+$", "", arxiv_id),
-        title=title,
-        abstract=(metas.get("citation_abstract") or [""])[0],
-        authors=[a for a in metas.get("citation_author") or [] if a],
-        published=date or None,
-    )
+    return SearchHit(arxiv_id=page["arxiv_id"], title=page["title"],
+                     abstract=page["abstract"], authors=page["authors"],
+                     published=page["published"])
 
 @dataclass
 class SearchHit:

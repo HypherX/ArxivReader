@@ -1,14 +1,18 @@
-"""ArXiv 链接解析、元数据获取与 PDF 下载（基于官方 arxiv 包，2.x API）。
+"""ArXiv 链接解析、元数据获取与 PDF 下载。
 
 对外：
   normalize_arxiv_id(raw)   把各种形式的链接/ID 规范成 arxiv id
   fetch_metadata(arxiv_id)  取标题/作者/摘要/分类/发表时间/pdf_url -> PaperMeta
   download_pdf(meta, dir)   下载 PDF 到指定目录，返回本地路径
   safe_dirname(name)        文件夹名清洗（入库落盘路径共用同一口径）
+  ArxivUnavailable          arXiv 暂时不可用（限流/超时），与"找不到"(ValueError) 区分
+
+限流韧性：fetch_metadata 在 export API 限流/超时（客户端已带 20s 超时兜底）时回落
+主站 abs 页 meta 标签（两套独立限流）；两者都挂抛 ArxivUnavailable 让上层提示稍后重试。
 
 下载策略：先试**多连接分块并行**（arXiv 支持 Range，本机单连接常被限速到几十 KB/s），
-任一步骤不满足条件（不支持 Range / 分块失败 / 成品校验不通过）就回落官方客户端的
-单连接下载，保证行为与以前一致。
+任一步骤不满足条件（不支持 Range / 分块失败 / 成品校验不通过）就回落自备的单连接
+流式下载（官方库 4.x 已移除 Result.download_pdf，原回落路径是死代码）。
 """
 
 import logging
@@ -23,8 +27,9 @@ from pathlib import Path
 from typing import List, Optional
 
 import arxiv
+import requests
 
-from harness import arxiv_client
+from harness import arxiv_client, arxiv_page
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +45,10 @@ _PARALLEL_CHUNK = 262144
 _PARALLEL_WORKERS = 8
 _PARALLEL_TIMEOUT = 60.0
 
+
+class ArxivUnavailable(Exception):
+    """arXiv 暂时不可用（限流/超时，含 abs 页兜底也失败）：稍后可重试，与"找不到"区分。"""
+
 @dataclass
 class PaperMeta:
     arxiv_id: str                       # 规范 id（不含版本号）
@@ -49,7 +58,7 @@ class PaperMeta:
     categories: List[str]
     published: Optional[str]
     pdf_url: Optional[str]
-    result: object = field(default=None, repr=False)   # 原始 arxiv.Result，供下载用
+    result: object = field(default=None, repr=False)   # 原始 arxiv.Result（仅 API 路径有，调试用）
 
 
 def normalize_arxiv_id(raw: str) -> str:
@@ -88,9 +97,31 @@ def strip_version(arxiv_id: str) -> str:
 
 
 def fetch_metadata(arxiv_id: str) -> PaperMeta:
-    """按 id 取元数据；arxiv_id 可含版本号。找不到时抛 ValueError。"""
-    search = arxiv.Search(id_list=[arxiv_id])
-    matches = arxiv_client.results(search)
+    """按 id 取元数据；arxiv_id 可含版本号。
+
+    export API 限流/超时时回落主站 abs 页（两套独立限流）；两者都挂抛
+    ArxivUnavailable（稍后可重试），找不到抛 ValueError。"""
+    try:
+        matches = arxiv_client.results(arxiv.Search(id_list=[arxiv_id]))
+    except (arxiv.HTTPError, requests.exceptions.RequestException) as exc:
+        logger.info("export API 取元数据失败（%s），回落 abs 页：%s",
+                    type(exc).__name__, arxiv_id)
+        try:
+            page = arxiv_page.fetch_abs_page_meta(arxiv_id)
+        except arxiv_page.PageTransient as page_exc:
+            raise ArxivUnavailable(
+                "arXiv 暂不可用（{}），请稍后重试".format(str(page_exc)[:80]))
+        if page is None:
+            raise ValueError("ArXiv 未找到该论文：{}".format(arxiv_id))
+        return PaperMeta(
+            arxiv_id=strip_version(page["arxiv_id"]),
+            title=page["title"],
+            authors=page["authors"],
+            abstract=page["abstract"],
+            categories=[],                     # abs 页 meta 不带学科分类，留空待后续刷新
+            published=page["published"],
+            pdf_url=page["pdf_url"],
+        )
     result = matches[0] if matches else None
     if result is None:
         raise ValueError("ArXiv 未找到该论文：{}".format(arxiv_id))
@@ -171,10 +202,35 @@ def download_pdf(meta: PaperMeta, dest_dir: str, filename: Optional[str] = None)
         logger.info("并行分块下载完成：%s", dest)
         return dest
 
-    if meta.result is None:
-        raise ValueError("缺少 arxiv 结果对象，无法下载 PDF")
     logger.info("回落单连接下载：%s", url)
-    return Path(meta.result.download_pdf(dirpath=dest_dir, filename=fname))
+    return _download_single(url, dest)
+
+
+def _download_single(url: str, dest: Path, *, timeout: float = _PARALLEL_TIMEOUT,
+                     tries: int = 3) -> Path:
+    """单连接流式下载回落路径（官方库 4.x 已移除 Result.download_pdf，自己实现）。
+
+    带超时与有限重试，成品过 _pdf_ok 校验后才替换目标文件，不留半截 PDF。"""
+    last: Optional[Exception] = None
+    for _ in range(max(1, tries)):
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        try:
+            with requests.get(url, stream=True, timeout=timeout,
+                              headers={"User-Agent": _UA}) as resp:
+                if resp.status_code >= 400:
+                    raise RuntimeError("HTTP {}".format(resp.status_code))
+                with open(tmp, "wb") as fh:
+                    for chunk in resp.iter_content(chunk_size=_PARALLEL_CHUNK):
+                        if chunk:
+                            fh.write(chunk)
+            if not _pdf_ok(tmp):
+                raise RuntimeError("成品 PDF 校验未通过")
+            tmp.replace(dest)
+            return dest
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            tmp.unlink(missing_ok=True)
+    raise ArxivUnavailable("下载 PDF 失败（{}），请稍后重试".format(str(last)[:100]))
 
 
 def _download_parallel(url: str, dest: Path, *,
