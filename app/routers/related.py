@@ -1,12 +1,12 @@
-"""智能关联检索路由：Related Work 检索 -> 候选判定 -> 加入详细阅读。
+"""智能关联检索路由：Related Work 检索 -> 候选判定 -> 加入文献库。
 
 本层零 prompt、零 SQL：编排在 `knowledge.related`，序列化在 `knowledge.store`。
 
   POST   /api/papers/{paper_id}/related/run       启动关联检索（后台线程），返回 run 供轮询
-  GET    /api/papers/{paper_id}/related            步骤清单 + 最新 run + 强相关候选 + 计数
+  GET    /api/papers/{paper_id}/related            步骤清单 + 最新 run + 候选 + 计数
   POST   /api/papers/{paper_id}/related/cancel     请求中断（当前阶段/当前论文后停止）
-  GET    /api/related/candidates/{cid}             单条候选（轮询 promote 状态用）
-  POST   /api/related/candidates/{cid}/promote     加入详细阅读（跳过 summary，进知识网络）
+  GET    /api/related/candidates/{cid}             单条候选（轮询入库状态用）
+  POST   /api/related/candidates/{cid}/promote     加入文献库（只下载全文，不跑阅读流程）
   POST   /api/related/candidates/{cid}/discard     丢弃候选（保留记录，不再出现在列表里）
   DELETE /api/related/candidates/{cid}             删除候选记录
 """
@@ -65,9 +65,8 @@ def start_related(paper_id: int, mode: str = Query("search", pattern="^(search|c
 
 
 @router.get("/papers/{paper_id}/related", response_model=schemas.RelatedViewOut)
-def get_related_view(paper_id: int, include_discarded: bool = False,
-                     db: Session = Depends(database.get_db)):
-    """关联检索视图：步骤清单（与后端 STAGE_TITLES 同源）+ 最新 run + 强相关候选。"""
+def get_related_view(paper_id: int, db: Session = Depends(database.get_db)):
+    """关联检索视图：步骤清单（与后端 STAGE_TITLES 同源）+ 最新 run + 未丢弃候选。"""
     paper = _paper_or_404(db, paper_id)
     run = store.latest_related_run(db, paper.id)
     language = run.output_language if run and run.output_language in ("zh", "en") else settings_store.get_output_language(db)
@@ -77,7 +76,7 @@ def get_related_view(paper_id: int, include_discarded: bool = False,
         stages=[schemas.RelatedStageOut(name=name, title=titles[name])
                 for name in related.STAGES],
         run=store.related_run_payload(run) if run is not None else None,
-        candidates=store.related_candidates_payload(db, paper.id, include_discarded=include_discarded),
+        candidates=store.related_candidates_payload(db, paper.id),
         counts=store.related_counts(db, paper.id),
     )
 
@@ -104,33 +103,26 @@ def get_related_candidate(candidate_id: int, db: Session = Depends(database.get_
 @router.post("/related/candidates/{candidate_id}/promote", response_model=schemas.RelatedPromoteOut)
 def promote_related_candidate_endpoint(
         candidate_id: int,
-        background: bool = Query(True, description="true = 后台执行，用 promote_state 轮询"),
-        trigger_pipeline: bool = Query(True, description="是否同时跑知识网络 pipeline"),
+        background: bool = Query(True, description="true = 后台下载，用 promote_state 轮询"),
         db: Session = Depends(database.get_db)):
-    """加入详细阅读：下载全文 -> 建 Paper -> 预写 summary 产物 -> 跑知识网络（跳过 summary）。
-
-    流程衔接：候选在检索阶段已生成 quick_summary，这里把它补成正式产物后按
-    tree -> deep -> graph 运行，与缓冲区「加入详细阅读」共用同一套
-    pipeline 实现（幂等、可断点续跑）。
-    """
+    """加入文献库：下载全文并放进「全部论文」。不调用模型，不跑阅读步骤。"""
     row = _candidate_or_404(db, candidate_id)
-    if row.status == store.RELATED_PROMOTED and row.promoted_paper_id and row.promote_state == "done":
-        return schemas.RelatedPromoteOut(candidate_id=row.id,
-                                         promote_state=row.promote_state or "done",
-                                         paper_id=row.promoted_paper_id)
-    _settings_or_400(db)
+    if row.status == store.RELATED_PROMOTED and row.promote_state == "done":
+        linked = related._library_paper_for_candidate(db, row)
+        if linked is not None:
+            return schemas.RelatedPromoteOut(candidate_id=row.id,
+                                             promote_state="done",
+                                             paper_id=linked.id)
     if background:
-        state = related.start_related_promote_background(candidate_id,
-                                                         trigger_pipeline=trigger_pipeline)
+        state = related.start_related_promote_background(candidate_id)
         return schemas.RelatedPromoteOut(candidate_id=row.id, promote_state=state)
     try:
-        result = related.promote_related_candidate(db, row, trigger_pipeline=trigger_pipeline)
+        result = related.promote_related_candidate(db, row)
     except Exception as exc:  # noqa: BLE001
-        logger.warning("关联候选提升入库失败（candidate=%s）：%s", candidate_id, str(exc)[:300])
-        raise HTTPException(status_code=502, detail="加入详细阅读失败：{}".format(str(exc)[:200]))
+        logger.warning("关联候选加入文献库失败（candidate=%s）：%s", candidate_id, str(exc)[:300])
+        raise HTTPException(status_code=502, detail="加入文献库失败：{}".format(str(exc)[:200]))
     return schemas.RelatedPromoteOut(candidate_id=row.id, promote_state=row.promote_state,
-                                     paper_id=result.get("paper_id"),
-                                     pipeline=result.get("pipeline"))
+                                     paper_id=result.get("paper_id"))
 
 
 @router.post("/related/candidates/{candidate_id}/discard",

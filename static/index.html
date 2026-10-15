@@ -73,7 +73,7 @@
 <span class="v-ops">
 <button class="mini" data-i18n="ui.010b35dc54d3" data-i18n-title="ui.42dff8e480a6" id="full-translate" title="用 pdf2zh 引擎翻译整篇 PDF：中英对照版或纯译文版">🌐 全文翻译</button>
 <button class="mini" data-i18n="ui.8c1d7b64e888" data-i18n-title="ui.d3ad4a5538c4" id="open-graph" title="在中间栏显示这篇论文的关系图谱">🕸 关系图谱</button>
-<button class="mini" data-i18n="ui.1b479fbe937b" data-i18n-title="ui.bea87d37cedf" id="run-related" title="智能关联检索：读当前论文的 Related Work / 参考文献，自动到 arXiv 检索并筛选强相关论文（可一键加入详细阅读）">🔗 智能关联检索</button>
+<button class="mini" data-i18n="ui.1b479fbe937b" data-i18n-title="ui.bea87d37cedf" id="run-related" title="智能关联检索：读当前论文的 Related Work / 参考文献，自动到 arXiv 检索并筛选相关论文（可加入文献库，之后再决定是否阅读）">🔗 智能关联检索</button>
 <button class="mini" data-i18n="ui.ee4421ed1423" data-i18n-title="ui.4d387b9b93c4" id="move-paper" title="移动到其它文件夹">📁 移动</button>
 <button class="mini danger" data-i18n="ui.4578951a8e18" data-i18n-title="ui.63f99a3c2164" id="delete-paper" title="从库中删除">🗑 删除</button>
 <button class="mini pane-hide" data-hide="viewer" data-i18n-title="ui.578799945054" title="隐藏此栏">«</button>
@@ -172,9 +172,9 @@
 </div>
 <div class="ai-actions" id="ai-actions">
 <button class="ai-act" data-i18n-title="ui.6b7997209758" data-step="summary" id="ai-summary" title="只跑快速总结"><span class="aa-icon">🧾</span><span class="aa-name" data-i18n="ui.f1e2d3c4b5a6">快速总结</span><span class="aa-state"></span></button>
-<button class="ai-act" data-i18n-title="ui.150e5e6ffe35" data-step="tree" id="ai-tree" title="只跑唯一分类：把论文归入方向文件夹"><span class="aa-icon">🗂</span><span class="aa-name" data-i18n="ui.a1b2c3d4e5f6">自动分类</span><span class="aa-state"></span></button>
+<button class="ai-act" data-i18n-title="ui.150e5e6ffe35" data-step="tree" id="ai-tree" title="自动分类：需要已有快速总结，再把论文归入方向文件夹"><span class="aa-icon">🗂</span><span class="aa-name" data-i18n="ui.a1b2c3d4e5f6">自动分类</span><span class="aa-state"></span></button>
 <button class="ai-act" data-i18n-title="ui.f96e8c74801d" data-step="deep" id="ai-deep" title="只跑深度精读"><span class="aa-icon">📖</span><span class="aa-name" data-i18n="ui.1a2b3c4d5e6f">深度精读</span><span class="aa-state"></span></button>
-<button class="ai-act" data-i18n-title="ui.d4a30c3280c0" data-step="graph" id="ai-graph" title="只跑论文关系：抽取与同方向论文的关系并画出图谱"><span class="aa-icon">🕸</span><span class="aa-name" data-i18n="ui.6f5e4d3c2b1a">论文关系</span><span class="aa-state"></span></button>
+<button class="ai-act" data-i18n-title="ui.d4a30c3280c0" data-step="graph" id="ai-graph" title="论文关系：需要已有深度精读和分类，再抽取与同方向论文的关系"><span class="aa-icon">🕸</span><span class="aa-name" data-i18n="ui.6f5e4d3c2b1a">论文关系</span><span class="aa-state"></span></button>
 </div>
 <div class="pipeline-panel hidden" id="pipeline-panel"></div>
 <!-- 阅读产物：对话 / 快速总结 / 深度精读 三个页签（产物由知识网络 pipeline 生成） -->
@@ -303,7 +303,7 @@
 </div>
 </div>
 <div class="ctx-menu hidden" id="ctx-menu"></div>
-<!-- 智能关联检索（Related Work -> 候选论文 -> 加入详细阅读） -->
+<!-- 智能关联检索（Related Work -> 候选论文 -> 加入文献库） -->
 <div class="modal hidden" id="related-modal">
 <div class="modal-card search-wide">
 <div class="modal-head">
@@ -323,7 +323,7 @@
 </div>
 <div class="search-results">
 <div class="results-head">
-<span data-i18n="ui.97ede34610b3" id="related-candidates-heading">候选论文 · 四档相关性</span><label><input id="r-show-discarded" type="checkbox"/><span data-i18n="ui.d4cab90760c8" id="related-discarded-label">显示已丢弃</span></label>
+<span data-i18n="ui.97ede34610b3" id="related-candidates-heading">候选论文 · 四档相关性</span>
 <span class="hint" id="r-counts"></span>
 </div>
 <div id="r-buffer"></div>
@@ -334,7 +334,7 @@
 <button class="ghost hidden" data-i18n="ui.888029ea124d" id="r-cancel">中断检索</button>
 <button class="ghost" data-i18n="ui.a459928ae272" id="r-continue">继续筛选</button>
 <button class="ghost" data-i18n="ui.7b04cee51d11" id="r-retry">重试失败 / 待核实</button>
-<span class="hint foot-hint" data-i18n="ui.f1bb9064ed8c">入库后复用同语言、同版本总结，继续分类、精读和关系；综述由文件夹菜单手动生成。</span>
+<span class="hint foot-hint" data-i18n="ui.f1bb9064ed8c">加入文献库只下载 PDF 到「全部论文」。总结、分类、精读和关系请打开论文后单独进行。</span>
 <span class="spacer"></span>
 <button class="ghost" data-close="related-modal" data-i18n="ui.3fd47edce45b">关闭</button>
 </div>

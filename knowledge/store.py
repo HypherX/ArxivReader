@@ -1029,12 +1029,11 @@ def get_related_candidate(db: Session, candidate_id: int) -> Optional[RelatedCan
 
 
 def list_related_candidates(db: Session, source_paper_id: int, *,
-                            include_discarded: bool = False,
                             limit: int = 200) -> List[RelatedCandidate]:
+    """候选列表。已丢弃的记录只用于去重，不再返回给界面。"""
     query = (db.query(RelatedCandidate)
-             .filter(RelatedCandidate.source_paper_id == int(source_paper_id)))
-    if not include_discarded:
-        query = query.filter(RelatedCandidate.status != RELATED_DISCARDED)
+             .filter(RelatedCandidate.source_paper_id == int(source_paper_id),
+                     RelatedCandidate.status != RELATED_DISCARDED))
     return (query.order_by(RelatedCandidate.relevance_score.desc(),
                            RelatedCandidate.match_score.desc(),
                            RelatedCandidate.id.desc())
@@ -1099,7 +1098,14 @@ def related_counts(db: Session, source_paper_id: int) -> Dict[str, int]:
     return counts
 
 
-def _related_candidate_payload(row: RelatedCandidate, in_library: bool) -> Dict[str, Any]:
+def _library_paper_ids(db: Session, arxiv_ids: List[str]) -> Dict[str, int]:
+    if not arxiv_ids:
+        return {}
+    return {arxiv_id: paper_id for paper_id, arxiv_id in
+            db.query(Paper.id, Paper.arxiv_id).filter(Paper.arxiv_id.in_(arxiv_ids)).all()}
+
+
+def _related_candidate_payload(row: RelatedCandidate, library_paper_id: Optional[int]) -> Dict[str, Any]:
     return {
         "id": row.id, "arxiv_id": row.arxiv_id, "title": row.title,
         "abstract": row.abstract, "authors": row.authors, "categories": row.categories,
@@ -1114,24 +1120,20 @@ def _related_candidate_payload(row: RelatedCandidate, in_library: bool) -> Dict[
         "retryable": bool(row.processing_error or row.relevance == "uncertain"),
         "promote_state": row.promote_state, "promote_error": row.promote_error,
         "promoted_paper_id": row.promoted_paper_id,
-        "in_library": bool(in_library),
+        "library_paper_id": library_paper_id,
+        "in_library": library_paper_id is not None,
         "created_at": _iso(row.created_at), "updated_at": _iso(row.updated_at),
     }
 
 
-def related_candidates_payload(db: Session, source_paper_id: int, *,
-                               include_discarded: bool = False) -> List[Dict[str, Any]]:
-    """候选列表（默认只给强相关待处理/已入库的）+ 是否已在库的标志。"""
-    rows = list_related_candidates(db, source_paper_id, include_discarded=include_discarded)
-    arxiv_ids = [r.arxiv_id for r in rows]
-    in_library: set = set()
-    if arxiv_ids:
-        in_library = {value[0] for value in
-                      db.query(Paper.arxiv_id).filter(Paper.arxiv_id.in_(arxiv_ids)).all()}
-    return [_related_candidate_payload(row, row.arxiv_id in in_library) for row in rows]
+def related_candidates_payload(db: Session, source_paper_id: int) -> List[Dict[str, Any]]:
+    """待筛选与已入库的候选（不含已丢弃）+ 文献库中的论文 id。"""
+    rows = list_related_candidates(db, source_paper_id)
+    library = _library_paper_ids(db, [row.arxiv_id for row in rows])
+    return [_related_candidate_payload(row, library.get(row.arxiv_id)) for row in rows]
 
 
 def related_candidate_payload_single(db: Session, row: RelatedCandidate) -> Dict[str, Any]:
-    """单条候选 payload（前端轮询 promote 状态时用）。"""
-    in_library = db.query(Paper).filter(Paper.arxiv_id == row.arxiv_id).count() > 0
-    return _related_candidate_payload(row, in_library)
+    """单条候选 payload（前端轮询入库状态时用）。"""
+    library = _library_paper_ids(db, [row.arxiv_id])
+    return _related_candidate_payload(row, library.get(row.arxiv_id))

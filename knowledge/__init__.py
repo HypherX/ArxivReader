@@ -10,8 +10,8 @@
    review.py      文件夹手动综述：全子树快照、分批证据、覆盖校验、取消与续跑
 
 2) 智能关联检索（把当前论文的 Related Work / 参考文献变成候选论文）
-   related.py       编排：collect→extract→search→judge + 候选提升入库
-                    （提升后按 tree→deep→graph 运行，缺 summary 时先补跑）
+   related.py       编排：collect→extract→search→judge + 候选加入文献库
+                    （只下载 PDF 放进「全部论文」，不自动跑阅读步骤）
 
 对外（其他层只应通过这里调用）：
   STEPS / STEP_TITLES / iter_pipeline_events / run_pipeline        单篇 pipeline

@@ -457,7 +457,7 @@
 
   // ---------------- 智能关联检索（Related Work 关联发现） ----------------
   // 与 ArXiv 检索页的关系：那是“按检索条件找新论文”；这里是从**当前论文的
-  // Related Work / 参考文献**出发反向找相关论文，判定强相关后可直接加入详细阅读。
+  // Related Work / 参考文献**出发反向找相关论文。筛选后只加入文献库，阅读动作之后单独做。
   var relatedPaper = null;
   var relatedRunId = null;
   var relatedTimer = null;
@@ -483,7 +483,7 @@
     if (!relatedPaper) return Promise.resolve();
     var box = $("r-buffer"), paperId = relatedPaper.id;
     if (box && !box.getAttribute("data-ready")) replaceChildren(box, skeleton("rows", 3));
-    return api.get("/api/papers/" + paperId + "/related?include_discarded=" + $("r-show-discarded").checked).then(function (data) {
+    return api.get("/api/papers/" + paperId + "/related").then(function (data) {
       if (!relatedPaper || relatedPaper.id !== paperId) return null;
       box.setAttribute("data-ready", "1");
       relatedStages = data.stages || [];
@@ -548,26 +548,29 @@
       return;
     }
     items.forEach(function (c) {
-      var promoted = c.status === "promoted" || c.promote_state === "done";
+      var libraryId = c.library_paper_id || null;
+      var importing = c.promote_state === "running" || c.promote_state === "queued";
       var ops = el("div", { class: "b-ops" }, [
         el("button", { class: "mini", text: function () { return I18n.t("ui.13d61fea9f17"); }, onclick: function () { previewRelated(c, row); } })
       ]);
-      if (c.in_library && c.promoted_paper_id) {
+      if (libraryId) {
         ops.appendChild(el("button", { class: "mini", text: function () { return I18n.t("ui.c771248e511f"); },
-          onclick: function () { openPaperById(c.promoted_paper_id); } }));
+          onclick: function () { openPaperById(libraryId); } }));
+      } else if (!importing) {
+        ops.appendChild(el("button", { class: "mini primary", text: function () {
+          return c.promote_state === "failed" ? I18n.t("ui.7c77f8645948") : I18n.t("ui.396530b08ab5");
+        }, onclick: function () { promoteRelated(c, row); } }));
       }
-      if (!promoted || c.promote_state === "failed") {
-        ops.appendChild(el("button", { class: "mini primary", text: function () { return c.promote_state === "failed" ? I18n.t("ui.7c77f8645948") : I18n.t("ui.396530b08ab5"); },
-          onclick: function () { promoteRelated(c, row); } }));
+      if (!importing) {
+        ops.appendChild(el("button", { class: "mini danger", text: function () { return I18n.t("ui.b16f71b55691"); },
+          onclick: function () { discardRelated(c, row); } }));
       }
-      ops.appendChild(el("button", { class: "mini danger", text: function () { return I18n.t("ui.b16f71b55691"); },
-        onclick: function () { discardRelated(c, row); } }));
 
       var badges = el("div", { class: "b-badges" }, [
         el("span", { class: "b-chip", text: function () { return relevanceLabel(c.relevance) + " " + (c.relevance_score || 0).toFixed(2); } }),
         el("span", { class: "b-chip", text: function () { return I18n.t("ui.443b94ca42e8") + (c.match_score || 0).toFixed(2); } }),
       ]);
-      if (c.retryable) ops.appendChild(el("button", { class: "mini", text: function () { return I18n.t("ui.b8784c8dd563"); }, onclick: function () {
+      if (c.retryable && !importing) ops.appendChild(el("button", { class: "mini", text: function () { return I18n.t("ui.b8784c8dd563"); }, onclick: function () {
         var paperId = relatedPaper && relatedPaper.id;
         api.post("/api/related/candidates/" + c.id + "/retry").then(function (run) {
           if (!relatedPaper || relatedPaper.id !== paperId) return;
@@ -575,8 +578,7 @@
         }).catch(function (e) { toast(function () { return e.message; }, "err"); });
       } }));
       if (c.processing_error) badges.appendChild(el("span", { class: "b-chip warn", text: c.processing_error }));
-      if (c.in_library) badges.appendChild(el("span", { class: "b-chip path", text: function () { return I18n.t("ui.c18f5840e535"); } }));
-      if (promoted) badges.appendChild(el("span", { class: "b-chip ok", text: function () { return I18n.t("ui.47c8c2e7cd40"); } }));
+      if (libraryId) badges.appendChild(el("span", { class: "b-chip ok", text: function () { return I18n.t("ui.47c8c2e7cd40"); } }));
       if (c.promote_state === "running" || c.promote_state === "queued") {
         badges.appendChild(el("span", { class: "b-chip warn", text: function () { return I18n.t("ui.694b71bc8013"); } }));
       }
@@ -619,11 +621,13 @@
       var query = source.query || source.arxiv_id || seed.title || seed.arxiv_id || (seed.terms || []).join(" / ");
       detail.appendChild(el("p", { class: "hint", text: function () { return lang(label[0], label[1]) + ": " + query; } }));
     });
-    detail.appendChild(el("div", { class: "b-sec",
-      text: function () { return I18n.t("ui.711db2c132d0"); } }));
-    var md = el("div", { class: "md" });
-    setMd(md, c.summary_text || I18n.t("ui.a5520ba281f8"));
-    detail.appendChild(md);
+    if ((c.summary_text || "").trim()) {
+      detail.appendChild(el("div", { class: "b-sec",
+        text: function () { return I18n.t("ui.711db2c132d0"); } }));
+      var md = el("div", { class: "md" });
+      setMd(md, c.summary_text);
+      detail.appendChild(md);
+    }
     detail.appendChild(el("div", { class: "b-sec", text: function () { return I18n.t("ui.21c04b2eeeb4"); } }));
     detail.appendChild(el("div", { class: "b-text", text: function () { return c.abstract || I18n.t("ui.c7bcc6d27f3a"); } }));
     detail.classList.remove("hidden");
@@ -656,7 +660,7 @@
     if (!relatedPaper || $("related-modal").classList.contains("hidden")) return;
     var paperId = relatedPaper.id;
     if (relatedPolledRun !== runId) { relatedPolledRun = runId; relatedPolls = 0; }
-    api.get("/api/papers/" + paperId + "/related?include_discarded=" + $("r-show-discarded").checked).then(function (data) {
+    api.get("/api/papers/" + paperId + "/related").then(function (data) {
       if (!relatedPaper || relatedPaper.id !== paperId || relatedRunId !== runId) return;
       var run = data.run || null;
       renderRelatedRun(run);
@@ -696,11 +700,13 @@
       shortText(c.title || c.arxiv_id, 46),
       function () { return I18n.t("ui.e95f6cbd5563"); },
       function () { return I18n.t("ui.f017e3c8ee72"); },
-    ], { okText: I18n.t("ui.66b2dbc6cbdc") }).then(function (ok) {
+    ], { okText: I18n.t("ui.396530b08ab5") }).then(function (ok) {
       if (!ok) return null;
       var badge = el("span", { class: "b-state", text: function () { return I18n.t("ui.f938cc565569"); } });
-      row.querySelector(".b-ops").appendChild(badge);
-      return api.post("/api/related/candidates/" + c.id + "/promote?background=true&trigger_pipeline=true", {}).then(function () {
+      var ops = row.querySelector(".b-ops");
+      ops.appendChild(badge);
+      Array.prototype.forEach.call(ops.querySelectorAll("button"), function (button) { button.disabled = true; });
+      return api.post("/api/related/candidates/" + c.id + "/promote?background=true", {}).then(function () {
         var timer = setInterval(function () {
           api.get("/api/related/candidates/" + c.id).then(function (full) {
             if (full.promote_state === "running" || full.promote_state === "queued") {
@@ -710,16 +716,20 @@
             clearInterval(timer);
             if (full.promote_state === "done") {
               I18n.bind(badge, function () { return I18n.t("ui.150f4279f53b"); });
-              if (full.promote_error) toast(function () { return I18n.t("ui.c39e94f25624") + full.promote_error; }, "warn", 9000);
-              else toast(function () { return I18n.t("ui.ea6750b944fe"); }, "ok");
+              toast(function () { return I18n.t("ui.ea6750b944fe"); }, "ok");
               loadFolders(); loadPapers(); loadRelated();
             } else {
               I18n.bind(badge, function () { return I18n.t("ui.28384d7afd2e"); });
+              Array.prototype.forEach.call(ops.querySelectorAll("button"), function (button) { button.disabled = false; });
               toast(function () { return I18n.t("ui.94a6e89ecaf3") + (full.promote_error || I18n.t("ui.13a46616e16f")); }, "err", 9000);
             }
           }).catch(function () { /* 轮询失败就下次再试 */ });
-        }, 3000);
-      }).catch(function (e) { badge.remove(); toast(function () { return e.message; }, "err"); });
+        }, 2000);
+      }).catch(function (e) {
+        badge.remove();
+        Array.prototype.forEach.call(ops.querySelectorAll("button"), function (button) { button.disabled = false; });
+        toast(function () { return e.message; }, "err");
+      });
     });
   }
 
@@ -891,10 +901,19 @@
   }
 
   function openPaperById(paperId) {
-    var p = state.papers.find(function (x) { return x.id === paperId; });
-    if (!p) { toast(function () { return I18n.t("ui.150f4279f53b"); }, "warn"); return; }
-    if (state.currentPaper && state.currentPaper.id === p.id) { restoreViewerAfterGraph(); return; }
-    selectPaper(p);
+    function show(p) {
+      var modal = $("related-modal");
+      if (modal && !modal.classList.contains("hidden")) modal.classList.add("hidden");
+      var visibleHere = state.selectedFolderId === null || p.folder_id === state.selectedFolderId;
+      if (!visibleHere) selectFolder(null);
+      if (state.currentPaper && state.currentPaper.id === p.id) { restoreViewerAfterGraph(); return; }
+      selectPaper(p);
+    }
+    var cached = state.papers.find(function (x) { return x.id === paperId; });
+    if (cached) { show(cached); return; }
+    api.get("/api/papers/" + paperId).then(show).catch(function (e) {
+      toast(function () { return e.message; }, "err");
+    });
   }
 
   function deleteCurrentGraphNode() {
@@ -1243,7 +1262,7 @@
   }
 
   // ---------------- 知识网络 pipeline（对库内任一论文一键运行） ----------------
-  // 与「加入详细阅读」共用四步阅读流程，综述从文件夹手动生成。
+  // 四个阅读动作各自独立；综述从文件夹菜单手动生成。
   // 区别只是论文已在库里：不需要下载与归属，直接跑五步并实时显示进度。
   var PIPELINE_STEPS = [
     { name: "summary", get title() { return I18n.t("ui.2d97cc22a742"); } },
@@ -1362,22 +1381,31 @@
       ["summary", "tree", "deep", "graph"].map(function (step) {
         return { text: function () { return I18n.t("stage." + step); }, value: step };
       })).then(function (step) {
-        if (!step) return;
-        if (!state.currentPaper || state.currentPaper.id !== paper.id) selectPaper(paper);
-        runAiStep(step, false);
+    if (!step) return;
+    if (!state.currentPaper || state.currentPaper.id !== paper.id) selectPaper(paper);
+    loadPaperArtifacts(paper).then(function () {
+      if (!state.currentPaper || state.currentPaper.id !== paper.id) return;
+      runAiStep(step, false);
+    });
       });
   }
 
-  // 前置依赖：自动分类需要先有摘要，论文关系需要先有精读。
-  // 首次点击自动补齐前置步（已有最新产物时后端会跳过，不会重复调用）；
-  // 强制重跑（force）只重跑本步，避免连带重新生成摘要/精读。
-  var AI_STEP_PREREQS = { tree: ["summary"], graph: ["deep"] };
+  // 四个动作彼此独立。缺前置产物时提示用户自己去跑，不在背后串成一条流程。
+  function missingAiPrereq(step) {
+    if (step === "tree" && !(state.artifacts && state.artifacts.summary)) return "ui.needSummaryFirst";
+    if (step === "graph") {
+      if (!(state.artifacts && state.artifacts.deep_reading)) return "ui.needDeepFirst";
+      if (!(state.knowledge && state.knowledge.memberships && state.knowledge.memberships.length)) return "ui.needTreeFirst";
+    }
+    return "";
+  }
 
   function runAiStep(step, force) {
     var paper = state.currentPaper;
     if (!paper) { toast(function () { return I18n.t("ui.7912dc9e9b8b"); }, "err"); return; }
-    var steps = force ? [step] : (AI_STEP_PREREQS[step] || []).concat([step]);
-    runPaperPipeline(paper, !!force, steps);
+    var missing = missingAiPrereq(step);
+    if (missing) { toast(function () { return I18n.t(missing); }, "warn", 7000); return; }
+    runPaperPipeline(paper, !!force, [step]);
   }
 
   /** 每个动作按钮上直接显示这一步的现有结果，让"做过没有"一眼可见。 */
@@ -2242,7 +2270,6 @@
     });
     $("r-continue").addEventListener("click", function () { startRelated("continue"); });
     $("r-retry").addEventListener("click", function () { startRelated("retry"); });
-    $("r-show-discarded").addEventListener("change", loadRelated);
     $("relation-filter").addEventListener("change", renderRelations);
     $("relation-paper").addEventListener("change", renderRelations);
     $("graph-zoom-in").addEventListener("click", function () { graphZoom = Math.min(3, graphZoom * 1.2); applyGraphZoom(); });
