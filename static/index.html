@@ -32,6 +32,7 @@
 <button class="ghost" data-i18n="ui.a0ab5987d808" id="open-reviews">综述历史</button>
 
 
+<button class="ghost" data-i18n="sync.open" data-i18n-title="sync.open_title" id="open-sync">云同步</button>
 <button class="ghost" data-i18n="ui.df3d58c7d84b" id="open-settings">设置</button>
 </div>
 </header>
@@ -435,6 +436,47 @@
 <div class="hint" id="review-progress"></div>
 <div class="reading-actions" id="review-actions"></div>
 <article class="md" id="review-content"></article>
+</div>
+</div>
+</div>
+<div class="modal hidden" id="sync-modal">
+<div class="modal-card sync-card">
+<div class="modal-head"><span data-i18n="sync.title">Google Drive 同步</span><button class="mini" data-close="sync-modal">✕</button></div>
+<div class="modal-body">
+<p class="hint" data-i18n="sync.intro">把这台电脑上的文献库、PDF、阅读笔记和译文上传到你自己的 Google Drive。换电脑时用同一个 Google 账号和同一组 OAuth 客户端，再从云端恢复。两边都改过时不会自动合并。模型设置里的 API Key 会一起同步。翻译引擎不上传。</p>
+<details>
+<summary data-i18n="sync.setup_title">第一次使用：创建 Google 客户端</summary>
+<ol class="sync-steps">
+<li data-i18n="sync.setup1">打开 Google Cloud Console，新建或选中一个项目，并启用 Google Drive API。</li>
+<li data-i18n="sync.setup2">配置 OAuth 同意屏幕：用户类型选「外部」，发布状态保持「测试」，并把你的 Gmail 加为测试用户。</li>
+<li data-i18n="sync.setup3">创建 OAuth 客户端 ID，应用类型选「桌面应用」。</li>
+<li data-i18n="sync.setup4">把客户端 ID 和客户端密钥粘贴到下面并保存。授权页若提示应用未验证，测试用户选择继续即可。</li>
+</ol>
+</details>
+<label><span data-i18n="sync.client_id">客户端 ID</span><input autocomplete="off" id="sync-client-id" spellcheck="false" type="text"/></label>
+<label><span data-i18n="sync.client_secret">客户端密钥</span><input autocomplete="off" data-i18n-placeholder="sync.secret_placeholder" id="sync-client-secret" placeholder="留空表示不修改已保存的密钥" type="password"/></label>
+<div class="hint" id="sync-secret-hint"></div>
+<div class="sync-actions">
+<button class="ghost" data-i18n="sync.save_client" id="sync-save" type="button">保存客户端</button>
+<button class="ghost" data-i18n="sync.connect" id="sync-connect" type="button">连接 Google</button>
+<button class="ghost hidden" data-i18n="sync.disconnect" id="sync-disconnect" type="button">断开连接</button>
+</div>
+<div class="hint" id="sync-account"></div>
+<div class="sync-stats">
+<div class="sync-stat"><b data-i18n="sync.local">本机</b><span id="sync-local"></span></div>
+<div class="sync-stat"><b data-i18n="sync.cloud">云端</b><span id="sync-cloud"></span></div>
+</div>
+<div class="hint err hidden" id="sync-cloud-error"></div>
+<div class="hidden" id="sync-progress">
+<div class="progress"><div class="progress-bar" id="sync-bar"></div></div>
+<div class="hint" id="sync-progress-text"></div>
+</div>
+</div>
+<div class="modal-foot">
+<button class="ghost hidden" data-i18n="sync.cancel" id="sync-cancel" type="button">取消</button>
+<span class="spacer"></span>
+<button class="ghost" data-i18n="sync.pull" id="sync-pull" type="button">从云端恢复</button>
+<button class="primary" data-i18n="sync.push" id="sync-push" type="button">上传到云端</button>
 </div>
 </div>
 </div>
