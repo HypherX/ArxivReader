@@ -1,11 +1,10 @@
-"""论文正文的结构化视图（PaperDocument）：把 PDF 抽取的纯文本变成"可检索、可预算"的对象。
+"""论文正文的结构化视图（PaperDocument）：把 PDF 抽取的纯文本变成可交给模型的对象。
 
-输入是 pdf_service 抽出的文本（页间以 `[Page N]` 标记），输出三种消费方式，全部零 LLM：
+输入是 pdf_service 抽出的文本（页间以 `[Page N]` 标记）。消费方式：
 
-  outline()      章节清单（规范名 / 页范围 / 规模），供模型决定读哪一节
-  section_text() 按节取原文，供工具调用
-  search()       关键词检索片段（带页码），供工具调用
-  render()       按 token 预算渲染成模型上下文
+  render()          按 token 预算渲染（快速总结、关系比较）
+  render_complete() 按原文顺序放入全部章节，包含附录与参考文献（对话、深度精读）
+  match_section()   按规范名或原标题定位一节（关系抽取用）
 
 压缩手段（全部确定性、不丢正文信息）：
   1. 行级噪声清除：arXiv 侧栏/水印、期刊页脚、"Preprint/Under review"、孤立页码
@@ -14,7 +13,7 @@
   4. 空白归并：段内换行归一为空格、连续空格压缩（不删任何词）
   5. 参考文献/致谢：预算渲染默认整节丢弃；全文渲染（render_complete）会保留
   6. 预算裁剪：仅快速总结和关系比较使用。超预算时按信息密度取节并声明已省略。
-     对话和深度精读走 render_complete，按原文顺序放入正文和附录，不调用工具补读
+     对话和深度精读走 render_complete，按原文顺序放入正文和附录。
 """
 
 import re
@@ -229,11 +228,10 @@ def is_strong_heading(text: str) -> bool:
 
 # ---------------------------------------------------------------- 文档
 class PaperDocument:
-    """论文正文的结构化视图。构造后即可反复检索/渲染，无副作用。"""
+    """论文正文的结构化视图。构造后即可反复渲染，无副作用。"""
 
     def __init__(self, text: str):
         self.raw_text = text or ""
-        self.raw_chars = len(self.raw_text)
         self.dropped_lines: List[str] = []
         self.blocks: List[Block] = []
         self.sections: Dict[str, Section] = {}
@@ -363,7 +361,7 @@ class PaperDocument:
         section.blocks.append(block)
         return section
 
-    # ---------------- 统计 / 大纲 ----------------
+    # ---------------- 章节合并 ----------------
     def _merged_sections(self, language: str = "zh") -> Dict[str, Section]:
         """按规范名合并（同名片段按出现顺序拼接），用于渲染。"""
         merged: Dict[str, Section] = {}
@@ -377,47 +375,6 @@ class PaperDocument:
                 merged[name] = Section(key=name, title=section.title, blocks=list(section.blocks))
         return merged
 
-    @property
-    def clean_chars(self) -> int:
-        return sum(len(b.text) for b in self.blocks)
-
-    def stats(self) -> Dict[str, float]:
-        raw_tokens = tokens.estimate_tokens(self.raw_text)
-        clean_tokens = sum(b.tokens for b in self.blocks)
-        return {
-            "raw_chars": self.raw_chars,
-            "clean_chars": self.clean_chars,
-            "raw_tokens_est": raw_tokens,
-            "clean_tokens_est": clean_tokens,
-            "compression": round(1 - (self.clean_chars / self.raw_chars), 4) if self.raw_chars else 0.0,
-            "dropped_noise_lines": len(self.dropped_lines),
-            "sections": len(self._order),
-        }
-
-    def outline(self, language: str = "zh") -> List[Dict[str, object]]:
-        """章节清单：规范名 / 原标题 / 页范围 / 规模（供模型决定读哪一节）。"""
-        items = []
-        for name, section in self._merged_sections(language).items():
-            if not section.blocks:
-                continue
-            start, end = section.pages
-            items.append({
-                "key": name,
-                "title": section.title or _text(language, "(无标题)", "(Untitled)"),
-                "pages": "{}-{}".format(start, end) if start else "-",
-                "chars": section.chars,
-                "tokens_est": section.tokens,
-            })
-        return items
-
-    def outline_text(self, language: str = "zh") -> str:
-        lines = [_text(language, "| 章节 | 原文标题 | 页码 | 估算 token |", "| Section | Source title | Pages | Estimated tokens |"), "|---|---|---|---|"]
-        for item in self.outline(language):
-            lines.append("| {} | {} | {} | {} |".format(
-                item["key"], str(item["title"])[:48], item["pages"], item["tokens_est"]))
-        return "\n".join(lines)
-
-    # ---------------- 取内容（工具用） ----------------
     def _render_blocks(self, blocks: Sequence[Block]) -> str:
         parts: List[str] = []
         last_page = 0
@@ -444,58 +401,6 @@ class PaperDocument:
             if title and any(word in title for word in probe.split()):
                 return section
         return None
-
-    def section_text(self, name: str, max_tokens: int = 8000, language: str = "zh") -> str:
-        """取一节原文（带页码锚点）；超额度时截断并提示。"""
-        section = self.match_section(name)
-        if section is None:
-            available = ", ".join(i["key"] for i in self.outline(language)) or _text(language, "(空)", "(Empty)")
-            return _text(language, "未找到章节 {!r}。可用章节：{}", "Section {!r} not found. Available sections: {}").format(name, available)
-        text = self._render_blocks(section.blocks)
-        if tokens.estimate_tokens(text) <= max_tokens:
-            return text
-        note = _text(language, "\n...(本节过长已截断，可改用 search_text 精确定位)", "\n...(Section truncated; use search_text to locate further evidence)")
-        return _prefix(text, max_tokens - tokens.estimate_tokens(note)) + note
-
-    def read_page(self, page: int, span: int = 1, language: str = "zh") -> str:
-        """读取指定页（及其后 span-1 页）。"""
-        pages = sorted({b.page for b in self.blocks})
-        if not pages:
-            return _text(language, "该论文没有可读正文。", "No readable full text is available.")
-        if page not in pages:
-            near = min(pages, key=lambda p: abs(p - page))
-            return _text(language, "第 {} 页无内容（可用页码：{}-{}，最接近的是第 {} 页）：\n\n{}",
-                         "Page {} is empty (available pages: {}-{}, nearest page: {}):\n\n{}").format(
-                page, pages[0], pages[-1], near, self.read_page(near, span, language))
-        chosen = set(range(page, page + max(1, span)))
-        blocks = [b for b in self.blocks if b.page in chosen]
-        return self._render_blocks(blocks) or _text(language, "第 {} 页无正文。", "Page {} has no text.").format(page)
-
-    def search(self, query: str, k: int = 4, window: int = 700, language: str = "zh") -> str:
-        """关键词检索：命中段落（带页码）返回给模型；多词按命中词数排序。"""
-        terms = [t for t in re.split(r"[\s,，、]+", (query or "").strip().lower()) if t]
-        if not terms:
-            return _text(language, "检索词为空。", "Search query is empty.")
-        scored: List[Tuple[int, int, Block]] = []
-        for idx, block in enumerate(self.blocks):
-            low = block.text.lower()
-            hits = sum(1 for t in terms if t in low)
-            if hits:
-                scored.append((hits, idx, block))
-        if not scored:
-            return _text(language, "未在正文中检索到 {!r}（可尝试更短的术语或换英文关键词）。",
-                                     "No matches for {!r}; try shorter terms or the original terminology.").format(query)
-        scored.sort(key=lambda item: (-item[0], item[1]))
-        out = [_text(language, "共 {} 段命中，展示前 {} 段：", "Matched {} passages; showing the first {}:").format(len(scored), min(k, len(scored)))]
-        for hits, _, block in scored[:k]:
-            text = block.text
-            first = min(text.lower().find(t) for t in terms if t in text.lower())
-            start = max(0, first - window // 3)
-            snippet = text[start:start + window]
-            prefix = "..." if start > 0 else ""
-            suffix = "..." if start + window < len(text) else ""
-            out.append("[p.{}] {}{}{}".format(block.page, prefix, snippet, suffix))
-        return "\n\n".join(out)
 
     # ---------------- 预算渲染（技能上下文） ----------------
     def render(self, tokens_budget: int = 40000, drop: Sequence[str] = _DROP_DEFAULT,
@@ -555,8 +460,8 @@ class PaperDocument:
 
         note = ""
         if omitted:
-            note = _text(language, "（为控制上下文，以下内容未展开：{}；如需可调用 read_section / search_text 工具取回）",
-                         "(Material omitted to fit the budget: {}; retrieve further evidence with read_section / search_text.)").format(
+            note = _text(language, "（为控制上下文，以下内容未展开：{}）",
+                         "(Material omitted to fit the budget: {}).").format(
                 ", ".join("{}≈{}t".format(k, t) for k, t in omitted))
         return RenderedContext(text="\n\n".join(parts).strip(), tokens=used, sections=included,
                                omitted=omitted, truncated=truncated, note=note)
@@ -585,10 +490,6 @@ class PaperDocument:
             used += tokens.estimate_tokens(header) + tokens.estimate_tokens(body)
             parts.append(header + "\n" + body)
         return RenderedContext(text="\n\n".join(parts).strip(), tokens=used, sections=included)
-
-    def to_prompt_context(self, tokens_budget: int = 40000) -> str:
-        """便捷方法：全文渲染（默认丢弃参考文献/致谢）。"""
-        return self.render(tokens_budget=tokens_budget).text
 
 
 def _trim_section(section: Section, limit: int) -> Section:
