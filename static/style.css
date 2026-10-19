@@ -1110,3 +1110,19 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
 .pdftr-flags label { display: flex; align-items: center; gap: 6px; flex: 1 1 45%; font-size: .88em; }
 .pdftr-flags input[type="checkbox"] { margin: 0; }
 #pdftr-key-hint { margin-top: 2px; }
+
+/* Google Drive 同步 */
+.modal-card.sync-card { width: 560px; }
+.sync-steps { margin: 8px 0 14px; padding-left: 18px; color: var(--text-soft); font-size: 12px; line-height: 1.6; }
+.sync-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.sync-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+.sync-stat {
+  background: var(--panel-soft); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px;
+}
+.sync-stat b { display: block; color: var(--text); font-size: 13px; margin-bottom: 4px; }
+.sync-stat span { color: var(--text-soft); font-size: 12px; line-height: 1.55; }
+#sync-progress { margin-top: 8px; }
+#sync-progress .hint { margin-top: 6px; }
+@media (max-width: 640px) {
+  .sync-stats { grid-template-columns: 1fr; }
+}
