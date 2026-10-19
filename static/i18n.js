@@ -147,7 +147,7 @@
     "ui.d609c36f4a6a": ["历史 #", "History #"],
     "ui.4927a53bcc88": ["加载中…", "Loading…"],
     "ui.6c985bcd62dc": ["内容暂不可用", "Content unavailable"],
-    "ui.e030e374bf92": ["未生成时可运行此步骤；历史版本不会被删除。", "Generate this step if missing; historical versions are preserved."],
+    "ui.e030e374bf92": ["还没有这一步的结果，可以现在生成。", "This step has no result yet. You can generate it now."],
     "ui.a1b7f83de414": ["现在生成", "Generate now"],
     "ui.d2342efd86fa": ["还没有", "Not yet generated: "],
     "ui.44d6db2fbb4c": ["没有可复制的内容", "Nothing to copy"],
@@ -273,7 +273,7 @@
     "ui.89d26e589c4a": ["语言已保存；历史内容保留，运行中任务保持原语言", "Language saved; historical content and running tasks are unchanged"],
     "ui.fb641318480e": ["新建顶层文件夹", "New top-level folder"],
     "ui.90c6d515e59a": ["重新生成：", "Regenerate: "],
-    "ui.898e5141af63": ["按当前语言重新生成，原内容保留为历史版本。", "Regenerate in the current language; preserve the original as a historical version."],
+    "ui.898e5141af63": ["按当前语言重新生成，并用新内容替换现在的结果。", "Regenerate in the current language and replace the current result."],
     "ui.82d6dc5546cc": ["会调用模型，深度精读可能耗时几分钟。", "This calls the model; deep reading may take several minutes."],
     "ui.71fde5e6250c": ["开始重跑", "Regenerate"],
     "ui.d1106aabd242": ["初始化失败：", "Unable to start: "],
@@ -370,7 +370,7 @@
     "ui.79b458781d47": ["阅读产物版本 / Reading version", "Reading version"],
     "ui.1c71cd1c9e84": ["复制全文 Markdown", "Copy the full Markdown text"],
     "ui.b34e30106b47": ["独立阅读页", "Open a separate reading window"],
-    "ui.e5bbeeb334a3": ["按当前语言重新生成，旧版本归档保留", "Regenerate in the current language and preserve the previous version"],
+    "ui.e5bbeeb334a3": ["按当前语言重新生成，并用新内容替换现在的结果", "Regenerate in the current language and replace the current result"],
     "ui.a78e4243c033": ["回到对话", "Back to chat"],
     "ui.dd716d62eec9": ["就这篇论文提问…（Enter 发送，Shift+Enter 换行）", "Ask about this paper… (Enter to send, Shift+Enter for a new line)"],
     "ui.4527d959b5ad": ["留空表示不修改", "Leave blank to keep the saved key"],
@@ -395,7 +395,7 @@
     "ui.80f8fbcfa011": ["放大", "Zoom in"],
     "ui.76921e19cac7": ["图谱加载失败", "Failed to load the graph"],
     "ui.b837705aa6e9": ["该节点还没有直接挂载的论文", "No papers are filed directly under this topic yet"],
-    "ui.d96cdfcd33d3": ["这一步已经有结果了；重跑会生成新版本，旧版本保留在历史里。", "This step already has a result; re-running creates a new version and keeps the old one in history."],
+    "ui.d96cdfcd33d3": ["这一步已经有结果了；重跑会用新内容替换现在的结果。", "This step already has a result; re-running replaces it with the new result."],
     "ui.c3c7f4b7e01a": ["选一个文件夹；不选就只在「全部论文」里", "Pick a folder, or leave it only under All papers"],
     "ui.8c1d7b64e888": ["🕸 关系图谱", "🕸 Relations"],
     "ui.d3ad4a5538c4": ["在中间栏显示这篇论文的关系图谱", "Show this paper's relation graph in the reader pane"],
@@ -612,7 +612,8 @@
     "chat.deleted": ["已删除这页对话", "Chat deleted"],
     "chat.edit_confirm_title": ["从这里重新开始", "Start over from here"],
     "chat.edit_confirm_line": ["这条之后的回复会被丢掉，再用修改后的内容重新生成。", "Replies after this message are discarded, then a new reply is generated."],
-    "chat.no_user": ["这页对话还没有可以重新生成的提问", "This chat has no question to regenerate"]
+    "chat.no_user": ["这页对话还没有可以重新生成的提问", "This chat has no question to regenerate"],
+    "reading.classify_moves": ["论文会挪到新的类别文件夹；没有论文的类别会自动删除。", "The paper moves into the new category folder. Categories with no papers are deleted."]
   };
   Object.keys(extra).forEach(function (key) { MESSAGES[key] = extra[key]; });
   var language = "zh", bindings = new Map(), channel;

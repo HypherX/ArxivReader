@@ -223,7 +223,7 @@ class PaperArtifact(Base):
 
 
 class PaperArtifactVersion(Base):
-    """重生成前的完整产物归档，语言切换不删除原正文。"""
+    """旧的产物归档。新的重跑会删掉这些记录，只保留当前结果。"""
 
     __tablename__ = "paper_artifact_versions"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

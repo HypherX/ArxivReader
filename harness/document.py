@@ -12,9 +12,9 @@
   2. 跨页重复行清除：在两页以上重复出现的短行（running head / 页脚）判为版式噪声
   3. 断词修复：`trans-\nformer` -> `transformer`
   4. 空白归并：段内换行归一为空格、连续空格压缩（不删任何词）
-  5. 参考文献/致谢：默认整节丢弃（引用列表对精读无信息增量）
-  6. 预算裁剪：超预算时按信息密度优先级取节，超出部分按段截断并显式声明"已省略"，
-     模型可用工具把省略内容取回（token 只花在真正要读的地方）
+  5. 参考文献/致谢：预算渲染默认整节丢弃；全文渲染（render_complete）会保留
+  6. 预算裁剪：仅快速总结和关系比较使用。超预算时按信息密度取节并声明已省略。
+     对话和深度精读走 render_complete，按原文顺序放入正文和附录，不调用工具补读
 """
 
 import re
@@ -131,7 +131,9 @@ _KEYWORD_MAP: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     ("limitations", ("limitation", "limitations")),
     ("future_work", ("future work", "future directions")),
     ("references", ("references", "bibliography")),
-    ("appendix", ("appendix", "appendices", "supplementary", "supplemental")),
+    ("appendix", ("appendix", "appendices", "supplementary material", "supplementary materials",
+                  "supplemental material", "supplemental materials", "supplementary", "supplemental",
+                  "附录", "补充材料")),
     ("acknowledgements", ("acknowledg", "acknowledgement", "acknowledgment")),
 )
 
@@ -568,6 +570,21 @@ class PaperDocument:
                 note = "…"
             text = _prefix(text, cap_tokens - tokens.estimate_tokens(note)) + note
         return text, tokens.estimate_tokens(text)
+
+    def render_complete(self, language: str = "zh") -> RenderedContext:
+        """按原文顺序渲染全部章节，包含附录，不按预算丢弃后部内容。"""
+        parts: List[str] = []
+        used = 0
+        included: List[str] = []
+        for key, section in self._merged_sections(language).items():
+            if not section.blocks:
+                continue
+            header = "## {} ({})".format(section.title or key, key)
+            body = self._render_blocks(section.blocks)
+            included.append(key)
+            used += tokens.estimate_tokens(header) + tokens.estimate_tokens(body)
+            parts.append(header + "\n" + body)
+        return RenderedContext(text="\n\n".join(parts).strip(), tokens=used, sections=included)
 
     def to_prompt_context(self, tokens_budget: int = 40000) -> str:
         """便捷方法：全文渲染（默认丢弃参考文献/致谢）。"""

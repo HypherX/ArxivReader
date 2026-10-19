@@ -22,6 +22,7 @@ from .skills.base import SkillSpec, get_skill, load_prompt, render_prompt
 from .tools import ToolContext, build_tools, openai_schemas
 
 _CONTEXT_HEADER = "## 论文正文（按预算整理，`[p.N]` 为原 PDF 页码；`###` 为章节标题）"
+_COMPLETE_HEADER = "## 论文全文（含正文与附录，`[p.N]` 为原 PDF 页码）"
 
 
 @dataclass
@@ -68,13 +69,18 @@ def build_skill_messages(spec: SkillSpec, paper: PaperInput, *,
     system = render_prompt(load_prompt(spec.prompt, output_language), output_language=output_language)
 
     doc = paper.document()
-    rendered = doc.render(tokens_budget=budget, drop=spec.drop_sections,
-                          sections=spec.sections or None,
-                          per_section_paras=spec.per_section_paras, language=output_language)
+    if spec.context_mode == "complete":
+        rendered = doc.render_complete(language=output_language)
+        context_header = choose(cfg, _COMPLETE_HEADER, "## Full PDF text, including appendices (`[p.N]` marks the source page)")
+    else:
+        rendered = doc.render(tokens_budget=budget, drop=spec.drop_sections,
+                              sections=spec.sections or None,
+                              per_section_paras=spec.per_section_paras, language=output_language)
+        context_header = choose(cfg, _CONTEXT_HEADER, "## Paper text (budgeted; page markers refer to the source PDF)")
 
     parts = [paper.meta_block(output_language)]
     if rendered.text:
-        parts.append("{}\n\n{}".format(choose(cfg, _CONTEXT_HEADER, "## Paper text (budgeted; page markers refer to the source PDF)"), rendered.text))
+        parts.append("{}\n\n{}".format(context_header, rendered.text))
     else:
         parts.append(choose(cfg, "## 论文正文\n\n无可用正文；请说明仅依据摘要。", "## Paper text\n\nNo full text is available. Clearly state that this is abstract-only."))
     if rendered.note:

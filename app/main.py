@@ -80,11 +80,10 @@ async def lifespan(app: FastAPI):
         pdftr_tasks.recover_interrupted(db)
     logger.info("数据库就绪：%s", config.get_db_path())
     logger.info("PDF 存放目录：%s", config.get_pdf_dir())
-    # Agent Harness 自检：启动时把已注册能力打出来，便于确认“新增技能/工具”是否生效
-    from harness import skills as harness_skills, tools as harness_tools
+    # 启动时列出实际会跑的阅读技能。对话和精读直接依据全文回答，不向模型提供工具。
+    from harness import skills as harness_skills
     from knowledge import STEPS as knowledge_steps
-    logger.info("Agent Harness：技能=%s；工具=%s",
-                ",".join(harness_skills.skill_names()), ",".join(harness_tools.tool_names()))
+    logger.info("Agent Harness：技能=%s", ",".join(harness_skills.skill_names()))
     logger.info("知识网络 pipeline：%s", " -> ".join(knowledge_steps))
     from knowledge import RELATED_STAGES as related_stages
     logger.info("关联检索 pipeline：%s", " -> ".join(related_stages))

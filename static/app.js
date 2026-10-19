@@ -1205,14 +1205,7 @@
     var request = ++artifactRequest;
     function current() { return request === artifactRequest && state.currentPaper && state.currentPaper.id === paper.id && artifactView === kind; }
     var versions = $("av-version");
-    replaceChildren(versions, el("option", { value: "", text: function () { return I18n.t("ui.c2a497830ef7"); } })); versions.disabled = true;
-    api.get("/api/papers/" + paper.id + "/artifacts/" + kind + "/versions").then(function (rows) {
-      if (!current()) return;
-      rows.forEach(function (row) {
-        versions.appendChild(el("option", { value: String(row.id), text: function () { return I18n.t("ui.d609c36f4a6a") + row.id + " · " + ((row.stats || {}).output_language || "unknown") + " · " + row.created_at; } }));
-      });
-      versions.value = version ? String(version) : ""; versions.disabled = !rows.length;
-    }).catch(function (e) { if (current()) toast(function () { return e.message; }, "err"); });
+    if (versions) versions.classList.add("hidden");
     $("messages").classList.add("hidden");
     $("artifact-view").classList.remove("hidden");
     setArtifactTabs(state.artifacts || {});
@@ -2652,8 +2645,9 @@
     Object.keys(AI_STEPS).forEach(function (step) {
       $("ai-" + step).addEventListener("click", function () {
         if ($("ai-" + step).classList.contains("done")) {
-          askConfirm(function () { return I18n.t("stage." + step); },
-            [function () { return I18n.t("ui.d96cdfcd33d3"); }],
+          var lines = [function () { return I18n.t("ui.d96cdfcd33d3"); }];
+          if (step === "tree") lines.push(function () { return I18n.t("reading.classify_moves"); });
+          askConfirm(function () { return I18n.t("stage." + step); }, lines,
             { okText: function () { return I18n.t("ui.5a3f4d156660"); } }).then(function (ok) { if (ok) runAiStep(step, true); });
           return;
         }
