@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 # 前向迁移清单：表 -> [(列名, SQLite 列定义)]；只在列缺失时 ALTER TABLE ADD COLUMN
 _ADDITIVE_COLUMNS = {
+    "chat_sessions": [("scope", "VARCHAR(32) NOT NULL DEFAULT 'chat'")],
     "chat_messages": [("reasoning_content", "TEXT NOT NULL DEFAULT ''")],
     "paper_directions": [("relations_at", "DATETIME"),
                          ("relations_signature", "VARCHAR(64) NOT NULL DEFAULT ''"),

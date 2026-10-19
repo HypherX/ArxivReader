@@ -210,7 +210,7 @@
     "ui.e63a45a5fc1e": ["未选择论文", "No paper selected"],
     "ui.64d26a4dd05e": ["会话 ", "Conversation "],
     "ui.f5c43014f0a5": ["开始提问吧", "Start a conversation"],
-    "ui.05536ddcdd77": ["例如：这篇论文解决了什么问题？核心方法是什么？和已有工作相比有什么不同？", "What problem does this paper address? How does its method work? How does it compare with prior work?"],
+    "ui.05536ddcdd77": ["这一页是新的对话，不会带上其他窗口里的内容。例如：这篇论文解决了什么问题？核心方法是什么？", "This page is a new chat and does not include other windows. For example: what problem does this paper address, and how does its method work?"],
     "ui.c50a64657f2a": ["\n\n> ⏹ 已终止", "\n\n> ⏹ Stopped"],
     "ui.459a568188e8": ["已终止本次生成，已生成的内容已保留", "Generation stopped; generated content has been preserved"],
     "ui.cfa7c64f924a": ["出错：", "Error: "],
@@ -613,7 +613,12 @@
     "chat.edit_confirm_title": ["从这里重新开始", "Start over from here"],
     "chat.edit_confirm_line": ["这条之后的回复会被丢掉，再用修改后的内容重新生成。", "Replies after this message are discarded, then a new reply is generated."],
     "chat.no_user": ["这页对话还没有可以重新生成的提问", "This chat has no question to regenerate"],
-    "reading.classify_moves": ["论文会挪到新的类别文件夹；没有论文的类别会自动删除。", "The paper moves into the new category folder. Categories with no papers are deleted."]
+    "reading.classify_moves": ["论文会挪到新的类别文件夹；没有论文的类别会自动删除。", "The paper moves into the new category folder. Categories with no papers are deleted."],
+    "follow.summary_placeholder": ["就这份总结继续问…（Enter 发送，Shift+Enter 换行）", "Ask about this summary… (Enter to send, Shift+Enter for a new line)"],
+    "follow.deep_placeholder": ["就这份精读继续问…（Enter 发送，Shift+Enter 换行）", "Ask about this deep reading… (Enter to send, Shift+Enter for a new line)"],
+    "follow.summary_hint": ["可以在下面继续追问。这里只保留这份总结的问答，不会带上其他窗口。", "Ask follow-up questions below. This window only keeps the summary thread."],
+    "follow.deep_hint": ["可以在下面继续追问。这里只保留这份精读的问答，不会带上其他窗口。", "Ask follow-up questions below. This window only keeps the deep-reading thread."],
+    "follow.need_artifact": ["先生成这一步的结果，再继续追问。", "Generate this result before asking a follow-up."]
   };
   Object.keys(extra).forEach(function (key) { MESSAGES[key] = extra[key]; });
   var language = "zh", bindings = new Map(), channel;

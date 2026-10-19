@@ -15,6 +15,8 @@
     search: "",
     sessions: [],
     currentSessionId: null,
+    followSessions: {},     // summary / deep_reading -> 这一页自己的追问会话
+    followLoad: 0,
     streaming: false,
     outputLanguage: "zh",
     onlyCurrent: false,
@@ -1187,6 +1189,38 @@
     });
   }
 
+  function isFollowView() {
+    return artifactView === "summary" || artifactView === "deep_reading";
+  }
+  function activeSessionId() {
+    return isFollowView() ? (state.followSessions[artifactView] || null) : state.currentSessionId;
+  }
+  function syncComposer() {
+    var follow = isFollowView();
+    $("chat-pane").classList.toggle("follow-mode", follow);
+    var key = artifactView === "summary" ? "follow.summary_placeholder"
+      : (artifactView === "deep_reading" ? "follow.deep_placeholder" : "ui.dd716d62eec9");
+    I18n.bind($("chat-input"), function () { return I18n.t(key); }, "placeholder");
+  }
+  function loadFollowThread(kind) {
+    var paper = state.currentPaper;
+    if (!paper || (kind !== "summary" && kind !== "deep_reading")) return Promise.resolve();
+    var request = artifactRequest;
+    var loadId = (state.followLoad || 0) + 1;
+    state.followLoad = loadId;
+    return api.get("/api/papers/" + paper.id + "/sessions?scope=" + kind).then(function (list) {
+      if (loadId !== state.followLoad || request !== artifactRequest || artifactView !== kind || state.streaming) return;
+      if (!state.currentPaper || state.currentPaper.id !== paper.id) return;
+      var session = (list || [])[0];
+      state.followSessions[kind] = session ? session.id : null;
+      if (!session) { renderMessages([], $("follow-messages"), true); return; }
+      return api.get("/api/sessions/" + session.id + "/messages").then(function (messages) {
+        if (loadId !== state.followLoad || request !== artifactRequest || artifactView !== kind || state.streaming) return;
+        if (document.querySelector("#follow-messages .msg-edit")) return;
+        renderMessages(messages, $("follow-messages"), true);
+      });
+    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
   function showChatView() {
     document.body.classList.remove("reading-focus");
     artifactView = "chat";
@@ -1195,6 +1229,7 @@
     $("artifact-view").classList.add("hidden");
     $("messages").classList.remove("hidden");
     setArtifactTabs(state.artifacts || {});
+    syncComposer();
   }
 
   function openArtifact(kind, version) {
@@ -1208,6 +1243,8 @@
     if (versions) versions.classList.add("hidden");
     $("messages").classList.add("hidden");
     $("artifact-view").classList.remove("hidden");
+    syncComposer();
+    loadFollowThread(kind);
     setArtifactTabs(state.artifacts || {});
     document.querySelector('.art-tab[data-view="' + kind + '"]').classList.remove("attn");
     if (state.artifacts) state.artifacts[kind] = state.artifacts[kind] || {};
@@ -1602,7 +1639,7 @@
   }
   function selectPaper(p) {
     if (!state.currentPaper || state.currentPaper.id !== p.id) {
-      stopActiveStream(); state.currentSessionId = null; state.sessions = [];
+      stopActiveStream(); state.currentSessionId = null; state.sessions = []; state.followSessions = {};
       artifactRequest++; artifactText = "";
     }
     hideNodeGraph();
@@ -1714,7 +1751,7 @@
     });
   }
   function clearCurrentPaper() {
-    state.currentPaper = null; state.sessions = []; state.currentSessionId = null;
+    state.currentPaper = null; state.sessions = []; state.currentSessionId = null; state.followSessions = {};
     state.artifacts = {}; state.knowledge = { memberships: [], edges: [] };
     hideReader();
     FullTranslate.onPaperChanged(null);
@@ -1744,7 +1781,7 @@
         if (!preserveMessages) renderMessages([]);
       }
       setSendButton(!!state.streaming);
-      if (selected && !preserveMessages) return loadMessages();
+      if (selected && !preserveMessages) return loadChatMessages();
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
   function deleteSession() {
@@ -1773,7 +1810,7 @@
       });
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
-  function loadMessages() {
+  function loadChatMessages() {
     if (!state.currentSessionId) { renderMessages([]); return; }
     var sid = state.currentSessionId;
     return api.get("/api/sessions/" + sid + "/messages")
@@ -1784,15 +1821,32 @@
       })
       .catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
-  function renderMessages(msgs) {
-    state.messages = msgs || [];
-    var box = $("messages"); replaceChildren(box);
+  function loadMessages() {
+    if (isFollowView()) return loadFollowThread(artifactView);
+    return loadChatMessages();
+  }
+  function renderMessages(msgs, box, follow) {
+    if (follow) {
+      if (isFollowView()) state.messages = msgs || [];
+    } else if (!isFollowView()) {
+      state.messages = msgs || [];
+    }
+    box = box || $("messages");
+    replaceChildren(box);
     var visible = state.messages.filter(function (m) { return m.role !== "system"; });
     if (!visible.length) {
-      box.appendChild(emptyState("💬", function () { return I18n.t("ui.f5c43014f0a5"); },
-        function () { return I18n.t("ui.05536ddcdd77"); }));
+      if (follow) {
+        box.classList.remove("has-msgs");
+        box.appendChild(el("div", { class: "follow-hint", text: function () {
+          return I18n.t(artifactView === "deep_reading" ? "follow.deep_hint" : "follow.summary_hint");
+        } }));
+      } else {
+        box.appendChild(emptyState("💬", function () { return I18n.t("ui.f5c43014f0a5"); },
+          function () { return I18n.t("ui.05536ddcdd77"); }));
+      }
       return;
     }
+    if (follow) box.classList.add("has-msgs");
     var lastId = visible[visible.length - 1].id;
     visible.forEach(function (m) {
       var node = el("div", { class: "msg " + m.role });
@@ -1852,31 +1906,32 @@
   }
   function submitEdit(message, raw) {
     var content = String(raw || "").trim();
-    if (!content || !state.currentSessionId || !message || !message.id) return;
+    if (!content || !activeSessionId() || !message || !message.id) return;
     var later = (state.messages || []).some(function (m) { return m.id > message.id; });
     var run = function () {
       state.messages = (state.messages || []).filter(function (m) { return m.id <= message.id && m.role !== "system"; })
         .map(function (m) {
           return m.id === message.id ? { id: m.id, role: "user", content: content, reasoning_content: "" } : m;
         });
-      renderMessages(state.messages);
-      beginAssistantStream("/api/sessions/" + state.currentSessionId + "/messages/" + message.id + "/edit", { content: content });
+      renderMessages(state.messages, isFollowView() ? $("follow-messages") : null, isFollowView());
+      beginAssistantStream("/api/sessions/" + activeSessionId() + "/messages/" + message.id + "/edit", { content: content });
     };
     if (!later) { run(); return; }
     askConfirm(function () { return I18n.t("chat.edit_confirm_title"); },
       [function () { return I18n.t("chat.edit_confirm_line"); }]).then(function (ok) { if (ok) run(); });
   }
   function regenerateTurn() {
-    if (state.streaming || !state.currentSessionId) return;
+    if (state.streaming || !activeSessionId()) return;
     var lastUser = null;
     (state.messages || []).forEach(function (m) { if (m.role === "user") lastUser = m; });
     if (!lastUser) { toast(function () { return I18n.t("chat.no_user"); }, "err"); return; }
     state.messages = (state.messages || []).filter(function (m) { return m.id <= lastUser.id; });
-    renderMessages(state.messages);
-    beginAssistantStream("/api/sessions/" + state.currentSessionId + "/regenerate", {});
+    renderMessages(state.messages, isFollowView() ? $("follow-messages") : null, isFollowView());
+    beginAssistantStream("/api/sessions/" + activeSessionId() + "/regenerate", {});
   }
   function beginAssistantStream(url, payload) {
-    var box = $("messages");
+    var followKind = isFollowView() ? artifactView : "";
+    var box = followKind ? $("follow-messages") : $("messages");
     var ai = el("div", { class: "msg assistant pending" });
     var answer = el("div", { class: "msg-body answer" });
     ai.appendChild(answer);
@@ -1890,9 +1945,14 @@
       state.streaming = false;
       setSendButton(false);
       if (aborted) toast(function () { return I18n.t("ui.459a568188e8"); }, "warn", 5000);
+      if (followKind) {
+        if (document.querySelector("#follow-messages .msg-edit")) return;
+        if (artifactView === followKind) loadFollowThread(followKind);
+        return;
+      }
       if (document.querySelector("#messages .msg-edit")) return;
       loadSessions(true);
-      loadMessages();
+      loadChatMessages();
     };
     streamSSE(url, payload, {
       kind: "chat",
@@ -1914,9 +1974,13 @@
         state.streaming = false;
         setSendButton(false);
         toast(function () { return I18n.t("ui.cfa7c64f924a") + I18n.value(errMsg); }, "err");
+        if (followKind) {
+          if (artifactView === followKind && !document.querySelector("#follow-messages .msg-edit")) loadFollowThread(followKind);
+          return;
+        }
         if (document.querySelector("#messages .msg-edit")) return;
         loadSessions(true);
-        loadMessages();
+        loadChatMessages();
       },
     });
   }
@@ -1926,15 +1990,23 @@
     var content = input.value.trim();
     if (!content) return;
     if (!state.currentPaper) { toast(function () { return I18n.t("ui.7912dc9e9b8b"); }, "err"); return; }
-    if (artifactView !== "chat") showChatView();   // 在产物阅读视图里提问时，自动回到对话
+    var followKind = isFollowView() ? artifactView : "";
+    if (followKind && !String(artifactText || "").trim()) {
+      toast(function () { return I18n.t("follow.need_artifact"); }, "warn");
+      return;
+    }
     var paperId = state.currentPaper.id;
     state.streaming = true; setSendButton(true);
     var start = function (sid) {
-      if (!state.currentPaper || state.currentPaper.id !== paperId) { state.streaming = false; setSendButton(false); return; }
-      state.currentSessionId = sid;
+      if (!state.currentPaper || state.currentPaper.id !== paperId || (followKind ? artifactView !== followKind : artifactView !== "chat")) {
+        state.streaming = false; setSendButton(false); return;
+      }
+      if (followKind) state.followSessions[followKind] = sid;
+      else state.currentSessionId = sid;
       input.value = "";
-      var box = $("messages");
-      if (box.querySelector(".empty")) replaceChildren(box);
+      var box = followKind ? $("follow-messages") : $("messages");
+      if (box.querySelector(".empty") || box.querySelector(".follow-hint")) replaceChildren(box);
+      if (followKind) box.classList.add("has-msgs");
       var userNode = el("div", { class: "msg user" });
       var userBody = el("div", { class: "msg-body" });
       setMd(userBody, content);
@@ -1943,13 +2015,16 @@
       beginAssistantStream("/api/sessions/" + sid + "/messages", { content: content });
     };
 
-    if (state.currentSessionId) start(state.currentSessionId);
-    else api.post("/api/papers/" + state.currentPaper.id + "/sessions").then(function (s) {
+    var existing = followKind ? state.followSessions[followKind] : state.currentSessionId;
+    if (existing) start(existing);
+    else api.post("/api/papers/" + state.currentPaper.id + "/sessions", { scope: followKind || "chat" }).then(function (s) {
       if (!state.currentPaper || state.currentPaper.id !== paperId) { state.streaming = false; setSendButton(false); return; }
-      state.sessions.unshift(s);
-      var sel = $("session-select");
-      sel.appendChild(el("option", { value: String(s.id), text: function () { return I18n.t("stage." + s.name); } }));
-      sel.value = String(s.id);
+      if (!followKind) {
+        state.sessions.unshift(s);
+        var sel = $("session-select");
+        sel.appendChild(el("option", { value: String(s.id), text: function () { return s.title || I18n.t("ui.64d26a4dd05e"); } }));
+        sel.value = String(s.id);
+      }
       start(s.id);
     }).catch(function (e) { state.streaming = false; setSendButton(false); toast(function () { return e.message; }, "err"); });
   }

@@ -81,6 +81,28 @@ def build_chat_messages(paper: Any, history: List[Dict[str, str]], question: str
     return messages, info
 
 
+def build_followup_messages(paper: Any, history: List[Dict[str, str]], question: str,
+                            artifact_md: str, *, scope: str,
+                            cfg: Optional[Dict[str, Any]] = None
+                            ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """在全文之外放进当前这份总结或精读。历史只来自调用方传入的这一页。"""
+    cfg = cfg or harness_config.get_harness_config()
+    messages, info = build_chat_messages(paper, history, question, cfg=cfg)
+    if scope == "deep_reading":
+        header = choose(cfg, "## 当前窗口：深度精读", "## This window: deep reading")
+        note = choose(cfg, "读者正在就下面这份精读继续追问。只依据论文全文和这份精读回答，不要引用其他窗口里的提问或回复。",
+                      "The reader is asking about the deep reading below. Use only the full PDF and this note. Do not use questions or replies from any other window.")
+    else:
+        header = choose(cfg, "## 当前窗口：快速总结", "## This window: quick summary")
+        note = choose(cfg, "读者正在就下面这份总结继续追问。只依据论文全文和这份总结回答，不要引用其他窗口里的提问或回复。",
+                      "The reader is asking about the summary below. Use only the full PDF and this summary. Do not use questions or replies from any other window.")
+    messages[0]["content"] = "{}\n\n{}\n\n{}\n\n{}".format(
+        messages[0]["content"].rstrip(), header, note, (artifact_md or "").strip())
+    info["followup_scope"] = scope
+    info["context_tokens_est"] = tokens.estimate_tokens(messages[0]["content"])
+    return messages, info
+
+
 def build_chat_tools(paper: Any, cfg: Optional[Dict[str, Any]] = None) -> List[Tool]:
     """对话不使用工具。论文内容已经整篇放进上下文。"""
     return []

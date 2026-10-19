@@ -20,7 +20,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from harness.config import get_base_dir
-from app.models import (DirectionNode, Folder, FolderReview, NodeSynthesis, Paper,
+from app.models import (ChatSession, DirectionNode, Folder, FolderReview, NodeSynthesis, Paper,
                         PaperArtifact, PaperArtifactVersion, PaperDirection, PaperRelation, PipelineRun,
                         RelatedCandidate, RelatedRun)
 
@@ -336,10 +336,15 @@ def upsert_artifact(db: Session, paper_id: int, kind: str, content_md: str, *,
         row = PaperArtifact(paper_id=paper_id, kind=kind)
         db.add(row)
     else:
-        # 重跑覆盖当前结果，不保留上一版。
+        # 重跑覆盖当前结果，不保留上一版，这份产物上的追问也从空白开始。
         (db.query(PaperArtifactVersion)
          .filter(PaperArtifactVersion.paper_id == paper_id, PaperArtifactVersion.kind == kind)
          .delete(synchronize_session=False))
+        scope = {ARTIFACT_SUMMARY: "summary", ARTIFACT_DEEP: "deep_reading"}.get(kind)
+        if scope:
+            sessions = db.query(ChatSession).filter_by(paper_id=paper_id, scope=scope).all()
+            for session in sessions:
+                db.delete(session)
     row.content_md = content_md or ""
     row.reasoning_md = reasoning_md or ""
     row.stats_json = json.dumps(stats or {}, ensure_ascii=False)

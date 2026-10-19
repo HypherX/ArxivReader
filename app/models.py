@@ -152,6 +152,8 @@ class ChatSession(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     paper_id: Mapped[int] = mapped_column(ForeignKey("papers.id"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="新对话")
+    # chat：右侧对话页，可有多页且互不继承。summary / deep_reading：挂在对应产物上的追问，各只有一页。
+    scope: Mapped[str] = mapped_column(String(32), nullable=False, default="chat", server_default="chat")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow)
 
     paper: Mapped["Paper"] = relationship("Paper", back_populates="sessions")
