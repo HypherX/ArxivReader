@@ -21,7 +21,7 @@ from harness import config
 from . import database
 from .routers import (cancel, chat, folders, knowledge, papers, pdftranslate, related,
                       reviews, settings as settings_router, skills, sync as sync_router,
-                      translations)
+                      translations, zotero)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("ArxivReader")
@@ -122,6 +122,7 @@ app.include_router(related.router)
 app.include_router(reviews.router)
 app.include_router(translations.router)
 app.include_router(pdftranslate.router)
+app.include_router(zotero.router)
 
 
 @app.get("/api/health", tags=["meta"])

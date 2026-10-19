@@ -19,6 +19,7 @@
 <select data-i18n-title="ui.c3c7f4b7e01a" id="target-folder" title="选一个文件夹；不选就只在「全部论文」里"></select>
 <button class="primary" data-i18n="ui.7a8a11ead507" id="add-btn">添加</button>
 <button class="ghost" data-i18n="ui.1c7f3a9bd2e4" data-i18n-title="ui.6e2b8d4fa903" id="upload-btn" title="上传本地 PDF 文件入库">📤 上传 PDF</button>
+<button class="ghost" data-i18n="zotero.open" data-i18n-title="zotero.open_title" id="zotero-btn" title="从本机 Zotero 文库导入论文">📥 Zotero 导入</button>
 <input accept=".pdf,application/pdf" hidden id="pdf-upload-input" type="file"/>
 </div>
 <div class="layout-toggles" data-i18n-title="ui.45e25f083f33" title="显示 / 隐藏各面板">
@@ -496,6 +497,30 @@
 <span class="spacer"></span>
 <button class="ghost" data-i18n="sync.pull" id="sync-pull" type="button">从云端恢复</button>
 <button class="primary" data-i18n="sync.push" id="sync-push" type="button">上传到云端</button>
+</div>
+</div>
+</div>
+<div class="modal hidden" id="zotero-modal">
+<div class="modal-card sync-card">
+<div class="modal-head"><span data-i18n="zotero.title">从 Zotero 导入</span><button class="mini" data-close="zotero-modal">✕</button></div>
+<div class="modal-body">
+<p class="hint" data-i18n="zotero.intro">把本机 Zotero 文库里的论文（PDF、标题、作者、摘要）复制进 ArxivReader，Zotero 里的数据原样保留。已入库的论文会自动跳过，可以重复执行。</p>
+<label><span data-i18n="zotero.path">Zotero 数据目录</span><input autocomplete="off" id="zotero-path" placeholder="~/Zotero" spellcheck="false" type="text"/></label>
+<div class="hint" id="zotero-path-hint" data-i18n="zotero.path_hint">默认读取 ~/Zotero；改过位置的话填你的数据目录（里面应有 zotero.sqlite 和 storage/）。导入前建议先关闭 Zotero，避免正在写入的数据不完整。</div>
+<div class="sync-actions">
+<button class="ghost" data-i18n="zotero.scan" id="zotero-scan" type="button">扫描</button>
+</div>
+<div class="hint hidden" id="zotero-scan-result"></div>
+<label class="hidden" id="zotero-collections-row"><input id="zotero-use-collections" type="checkbox" checked="checked"/><span data-i18n="zotero.use_collections">按 Zotero 收藏夹建文件夹（多个收藏夹取最深的那个）</span></label>
+<div class="hidden" id="zotero-progress">
+<div class="progress"><div class="progress-bar" id="zotero-bar"></div></div>
+<div class="hint" id="zotero-progress-text"></div>
+</div>
+</div>
+<div class="modal-foot">
+<button class="ghost hidden" data-i18n="zotero.cancel" id="zotero-cancel" type="button">取消</button>
+<span class="spacer"></span>
+<button class="primary" data-i18n="zotero.import" disabled id="zotero-import" type="button">开始导入</button>
 </div>
 </div>
 </div>
