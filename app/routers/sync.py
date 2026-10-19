@@ -1,4 +1,4 @@
-"""Google Drive 同步接口。令牌和客户端密钥只留在本机，响应里不回传。"""
+"""云同步接口。令牌、客户端密钥和应用密码只留在本机，响应里不回传。"""
 
 from typing import Any, Dict
 
@@ -23,6 +23,16 @@ def get_status():
 def save_client(body: Dict[str, Any]):
     try:
         service.save_client(body.get("client_id"), body.get("client_secret"))
+    except SyncError as exc:
+        _http(exc)
+    return service.status()
+
+
+@router.put("/webdav")
+def save_webdav(body: Dict[str, Any]):
+    try:
+        service.save_webdav_config(body.get("url"), body.get("username"),
+                                   body.get("password"), body.get("base_path"))
     except SyncError as exc:
         _http(exc)
     return service.status()

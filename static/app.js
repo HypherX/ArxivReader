@@ -2292,10 +2292,11 @@
     $("graph-reset").addEventListener("click", function () { graphZoom = 1; $("relation-paper").value = ""; $("relation-filter").value = ""; renderRelations(); });
   }
 
-  // ---------------- Google Drive 同步 ----------------
+  // ---------------- 云同步（Google Drive / WebDAV） ----------------
   var syncView = null;
   var syncSeen = 0;
   var syncWatching = false;
+  var syncTab = "google";
 
   function formatBytes(n) {
     n = Number(n) || 0;
@@ -2310,10 +2311,25 @@
     var date = new Date(iso);
     return isNaN(date.getTime()) ? iso : date.toLocaleString();
   }
+  function switchSyncTab(name, fillFromView) {
+    syncTab = name === "webdav" ? "webdav" : "google";
+    $("sync-pane-google").classList.toggle("hidden", syncTab !== "google");
+    $("sync-pane-webdav").classList.toggle("hidden", syncTab !== "webdav");
+    $("sync-tab-google").classList.toggle("active", syncTab === "google");
+    $("sync-tab-webdav").classList.toggle("active", syncTab === "webdav");
+    if (fillFromView && syncView) renderSync(syncView, true);
+  }
   function renderSync(view, fill) {
     syncView = view;
-    if (fill && document.activeElement !== $("sync-client-id")) $("sync-client-id").value = view.client_id || "";
+    var dav = view.webdav || {};
+    if (fill) {
+      if (document.activeElement !== $("sync-client-id")) $("sync-client-id").value = view.client_id || "";
+      if (document.activeElement !== $("sync-webdav-url")) $("sync-webdav-url").value = dav.url || "";
+      if (document.activeElement !== $("sync-webdav-username")) $("sync-webdav-username").value = dav.username || "";
+      if (document.activeElement !== $("sync-webdav-path")) $("sync-webdav-path").value = dav.base_path || "";
+    }
     I18n.bind($("sync-secret-hint"), function () { return view.has_client_secret ? I18n.t("sync.secret_saved") : ""; });
+    I18n.bind($("sync-webdav-hint"), function () { return dav.has_password ? I18n.t("sync.webdav_password_saved") : ""; });
     I18n.bind($("sync-account"), function () {
       if (!view.connected) return I18n.t("sync.disconnected");
       return view.email ? I18n.t("sync.account", { email: view.email }) : I18n.t("sync.account_unknown");
@@ -2352,8 +2368,12 @@
       });
     }
     $("sync-save").disabled = running;
+    $("sync-save-webdav").disabled = running;
     $("sync-connect").disabled = running || !view.configured;
-    I18n.bind($("sync-connect"), function () { return view.connected ? I18n.t("sync.reconnect") : I18n.t("sync.connect"); });
+    I18n.bind($("sync-connect"), function () {
+      if (view.connected) return I18n.t("sync.reconnect");
+      return I18n.t(view.provider === "webdav" ? "sync.connect_webdav" : "sync.connect");
+    });
     $("sync-disconnect").classList.toggle("hidden", !view.connected);
     $("sync-disconnect").disabled = running;
     $("sync-push").disabled = running || !view.connected;
@@ -2385,7 +2405,9 @@
     api.get("/api/sync").then(function (view) {
       if (view.job && view.job.finished) syncSeen = view.job.id;
       $("sync-client-secret").value = "";
+      $("sync-webdav-password").value = "";
       renderSync(view, true);
+      switchSyncTab(view.provider === "webdav" ? "webdav" : "google", false);
       $("sync-modal").classList.remove("hidden");
       if (view.job && view.job.running) { watchSync(); return; }
       api.post("/api/sync/cloud").then(function (next) {
@@ -2401,6 +2423,19 @@
       $("sync-client-secret").value = "";
       renderSync(view, true);
       toast(function () { return I18n.t("sync.saved"); }, "ok");
+    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
+  function saveSyncWebdav() {
+    var body = {
+      url: $("sync-webdav-url").value.trim(),
+      username: $("sync-webdav-username").value.trim(),
+      password: $("sync-webdav-password").value.trim(),
+      base_path: $("sync-webdav-path").value.trim(),
+    };
+    api.put("/api/sync/webdav", body).then(function (view) {
+      $("sync-webdav-password").value = "";
+      renderSync(view, true);
+      toast(function () { return I18n.t("sync.saved_webdav"); }, "ok");
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
   function startSync(path, body) {
@@ -2474,6 +2509,9 @@
 
     $("open-sync").addEventListener("click", openSync);
     $("sync-save").addEventListener("click", saveSyncClient);
+    $("sync-save-webdav").addEventListener("click", saveSyncWebdav);
+    $("sync-tab-google").addEventListener("click", function () { switchSyncTab("google", false); });
+    $("sync-tab-webdav").addEventListener("click", function () { switchSyncTab("webdav", false); });
     $("sync-connect").addEventListener("click", function () { startSync("/api/sync/connect"); });
     $("sync-disconnect").addEventListener("click", function () {
       askConfirm(function () { return I18n.t("sync.disconnect_title"); },

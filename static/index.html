@@ -441,9 +441,14 @@
 </div>
 <div class="modal hidden" id="sync-modal">
 <div class="modal-card sync-card">
-<div class="modal-head"><span data-i18n="sync.title">Google Drive 同步</span><button class="mini" data-close="sync-modal">✕</button></div>
+<div class="modal-head"><span data-i18n="sync.title">云同步</span><button class="mini" data-close="sync-modal">✕</button></div>
 <div class="modal-body">
-<p class="hint" data-i18n="sync.intro">把这台电脑上的文献库、PDF、阅读笔记和译文上传到你自己的 Google Drive。换电脑时用同一个 Google 账号和同一组 OAuth 客户端，再从云端恢复。两边都改过时不会自动合并。模型设置里的 API Key 会一起同步。翻译引擎不上传。</p>
+<p class="hint" data-i18n="sync.intro">把这台电脑上的文献库、PDF、阅读笔记和译文上传到你自己的云端。换电脑时从云端恢复。两边都改过时不会自动合并：上传用本地覆盖云端，恢复用云端覆盖本地。模型设置里的 API Key 会一起同步。翻译引擎不上传。</p>
+<div class="sync-tabs">
+<button class="sync-tab" data-i18n="sync.tab_google" id="sync-tab-google" type="button">Google Drive</button>
+<button class="sync-tab" data-i18n="sync.tab_webdav" id="sync-tab-webdav" type="button">WebDAV（坚果云等）</button>
+</div>
+<div id="sync-pane-google">
 <details>
 <summary data-i18n="sync.setup_title">第一次使用：创建 Google 客户端</summary>
 <ol class="sync-steps">
@@ -458,7 +463,21 @@
 <div class="hint" id="sync-secret-hint"></div>
 <div class="sync-actions">
 <button class="ghost" data-i18n="sync.save_client" id="sync-save" type="button">保存客户端</button>
-<button class="ghost" data-i18n="sync.connect" id="sync-connect" type="button">连接 Google</button>
+</div>
+</div>
+<div class="hidden" id="sync-pane-webdav">
+<p class="hint" data-i18n="sync.webdav_intro">支持任何 WebDAV 网盘。以坚果云为例：网页端「账户信息 → 安全选项 → 第三方应用管理」里添加应用密码，服务器填 https://dav.jianguoyun.com/dav/ ，账号填邮箱。备份放在下方目录里，占用你的网盘空间。</p>
+<label><span data-i18n="sync.webdav_url">服务器地址</span><input autocomplete="off" id="sync-webdav-url" placeholder="https://dav.jianguoyun.com/dav/" spellcheck="false" type="text"/></label>
+<label><span data-i18n="sync.webdav_username">账号</span><input autocomplete="off" id="sync-webdav-username" spellcheck="false" type="text"/></label>
+<label><span data-i18n="sync.webdav_password">应用密码</span><input autocomplete="off" data-i18n-placeholder="sync.secret_placeholder" id="sync-webdav-password" placeholder="留空表示不修改已保存的密码" type="password"/></label>
+<label><span data-i18n="sync.webdav_path">远程目录</span><input autocomplete="off" id="sync-webdav-path" placeholder="ArxivReader" spellcheck="false" type="text"/></label>
+<div class="hint" id="sync-webdav-hint"></div>
+<div class="sync-actions">
+<button class="ghost" data-i18n="sync.save_webdav" id="sync-save-webdav" type="button">保存 WebDAV</button>
+</div>
+</div>
+<div class="sync-actions">
+<button class="ghost" data-i18n="sync.connect" id="sync-connect" type="button">连接</button>
 <button class="ghost hidden" data-i18n="sync.disconnect" id="sync-disconnect" type="button">断开连接</button>
 </div>
 <div class="hint" id="sync-account"></div>

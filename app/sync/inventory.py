@@ -204,8 +204,9 @@ def parse_manifest(data):
         file_id = meta.get("id")
         sha = meta.get("sha256")
         size = meta.get("size")
-        if (not isinstance(file_id, str) or not 1 <= len(file_id) <= 256
-                or "/" in file_id or "\\" in file_id or ".." in file_id):
+        # Google 的 id 是其内部字符串；WebDAV 的 id 即相对路径。
+        # safe_rel 两种都容得下，同时挡住路径穿越。
+        if not isinstance(file_id, str) or not safe_rel(file_id):
             raise SyncError("sync.cloud_invalid")
         if not isinstance(sha, str) or len(sha) != 64 or any(ch not in "0123456789abcdef" for ch in sha):
             raise SyncError("sync.cloud_invalid")
