@@ -2463,9 +2463,10 @@
       if (state.streaming) stopChat();
       else sendMessage();
     });
-    $("chat-input").addEventListener("keydown", function (e) {
+    // 拼音、中英混输时回车是上屏，不是发送。上屏之后浏览器有时还会再派发一次 Enter，那一次也要丢掉。
+    bindImeKey($("chat-input"), function (e) {
+      if (e.key === "Escape" && state.streaming) { e.preventDefault(); stopChat(); return; }
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-      if (e.key === "Escape" && state.streaming) { e.preventDefault(); stopChat(); }
     });
     $("new-session").addEventListener("click", newSession);
     $("session-select").addEventListener("change", function () {

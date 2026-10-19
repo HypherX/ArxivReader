@@ -267,6 +267,7 @@
     record.box.insertBefore(canvas, record.box.firstChild);
     record.box.appendChild(layer);
     record.spans = null;
+    record.textLayer = null;
     var task;
     try {
       // 画布物理像素是 CSS 尺寸的 ratio 倍，渲染必须按同一倍率放大，否则只画满左上角。
@@ -337,7 +338,7 @@
       if (!content) { record.spans = []; return; }
       record.textLayer = new lib.TextLayer({ textContentSource: content, container: layer, viewport: viewport });
       return record.textLayer.render().then(function () {
-        record.spans = Array.prototype.slice.call(layer.querySelectorAll("span"));
+        record.spans = record.textLayer.textDivs.slice();
         if (state.query) highlight();
       });
     }).catch(function () { record.spans = []; });
@@ -346,9 +347,10 @@
   // ---------------------------------------------------------------- 全文检索
   function pageText(record) {
     if (!record.text) {
-      record.text = record.page.getTextContent({ includeMarkings: false }).then(function (content) {
-        return ((content && content.items) || []).map(function (item) { return item.str || ""; }).join(" ");
-      }).catch(function () { return ""; });
+      record.text = record.page.getTextContent({ includeMarkedContent: false }).then(function (content) {
+        record.items = (content && content.items) || [];
+        return record.items;
+      }).catch(function () { record.items = []; return []; });
     }
     return record.text;
   }
@@ -356,50 +358,103 @@
   function find(query, direction) {
     if (!state.doc) return Promise.resolve({ count: 0 });
     var term = (query || "").trim();
+    var fresh = term !== state.query;
     state.query = term;
     if (term.length < 2) { state.matches = []; state.matchIndex = -1; highlight(); updateLabels(); return Promise.resolve({ count: 0 }); }
     var token = state.token;
-    return Promise.all(state.pages.map(pageText)).then(function (texts) {
-      if (token !== state.token) return { count: 0 };
-      var matches = [], lower = term.toLowerCase();
-      texts.forEach(function (text, position) {
-        var haystack = text.toLowerCase(), at = haystack.indexOf(lower);
-        while (at >= 0 && matches.length < 3000) {
-          matches.push({ page: position + 1 });
-          at = haystack.indexOf(lower, at + lower.length);
-        }
+    var seq = (state.findSeq = (state.findSeq || 0) + 1);
+    return Promise.all(state.pages.map(pageText)).then(function (itemLists) {
+      if (token !== state.token || seq !== state.findSeq) return { count: 0 };
+      var matches = [];
+      itemLists.forEach(function (items, position) {
+        global.PdfFind.matchPage(items, term).forEach(function (ranges) {
+          if (matches.length < 3000) matches.push({ page: position + 1, ranges: ranges });
+        });
       });
       state.matches = matches;
       if (!matches.length) { state.matchIndex = -1; highlight(); updateLabels(); return { count: 0 }; }
-      state.matchIndex = direction === "prev"
-        ? (state.matchIndex - 1 + matches.length) % matches.length
-        : (state.matchIndex + 1) % matches.length;
-      gotoPage(matches[state.matchIndex].page);
+      if (fresh || state.matchIndex < 0 || state.matchIndex >= matches.length) {
+        state.matchIndex = direction === "prev" ? matches.length - 1 : 0;
+      } else {
+        state.matchIndex = direction === "prev"
+          ? (state.matchIndex - 1 + matches.length) % matches.length
+          : (state.matchIndex + 1) % matches.length;
+      }
+      var record = state.pages[matches[state.matchIndex].page - 1];
+      if (record && !record.textLayer) gotoPage(record.no);
       highlight();
       updateLabels();
       return { count: matches.length };
     });
   }
 
-  /** 在当前页把命中的那一行框出来：文字层已就绪的页才有效果。 */
-  function highlight() {
-    state.pages.forEach(function (p) {
-      var mark = p.box && p.box.querySelector(".pv-mark");
-      if (mark) mark.remove();
+  /** 把命中的字包进 mark。标记画在文字层内部，才会跟着字形缩放并对齐。 */
+  function clearHits() {
+    state.pages.forEach(function (page) {
+      var divs = page.textLayer && page.textLayer.textDivs;
+      if (!divs) return;
+      divs.forEach(function (span) {
+        if (!span || span.dataset.hitSource == null) return;
+        span.textContent = span.dataset.hitSource;
+        delete span.dataset.hitSource;
+      });
     });
-    var hit = state.matches[state.matchIndex];
-    if (!hit) return;
-    var record = state.pages[hit.page - 1];
-    if (!record || !record.spans) return;
+  }
+
+  function paintSpan(span, pieces) {
+    if (!span.isConnected) return;
+    if (span.dataset.hitSource == null) span.dataset.hitSource = span.textContent;
+    var text = span.dataset.hitSource;
+    var ordered = pieces.slice().sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+    while (span.firstChild) span.removeChild(span.firstChild);
+    var cursor = 0;
+    ordered.forEach(function (piece) {
+      var start = Math.max(cursor, Math.min(piece.start, text.length));
+      var end = Math.max(start, Math.min(piece.end, text.length));
+      if (start > cursor) span.appendChild(document.createTextNode(text.slice(cursor, start)));
+      if (end > start) {
+        var mark = document.createElement("mark");
+        mark.className = piece.current ? "pv-hit current" : "pv-hit";
+        mark.textContent = text.slice(start, end);
+        span.appendChild(mark);
+      }
+      cursor = end;
+    });
+    if (cursor < text.length) span.appendChild(document.createTextNode(text.slice(cursor)));
+  }
+
+  function highlight() {
+    clearHits();
+    var buckets = [];
+    state.matches.forEach(function (hit, index) {
+      var record = state.pages[hit.page - 1];
+      var divs = record && record.textLayer && record.textLayer.textDivs;
+      if (!divs) return;
+      var current = index === state.matchIndex;
+      hit.ranges.forEach(function (range) {
+        var span = divs[range.div];
+        if (!span) return;
+        var bucket = null;
+        for (var i = 0; i < buckets.length; i++) if (buckets[i].span === span) bucket = buckets[i];
+        if (!bucket) { bucket = { span: span, pieces: [] }; buckets.push(bucket); }
+        bucket.pieces.push({ start: range.start, end: range.end, current: current });
+      });
+    });
+    buckets.forEach(function (bucket) { paintSpan(bucket.span, bucket.pieces); });
+    revealCurrent();
+  }
+
+  function revealCurrent() {
+    var mark = document.querySelector("#pdf-pages mark.pv-hit.current");
     var box = scrollBox();
-    var rect = record.box.getBoundingClientRect();
+    if (!mark || !box) return;
     var host = box.getBoundingClientRect();
-    var mark = node("span", { class: "pv-mark" });
-    mark.style.left = (rect.left - host.left + 4) + "px";
-    mark.style.top = (rect.top - host.top + 4) + "px";
-    mark.style.width = Math.max(24, rect.width - 8) + "px";
-    mark.style.height = Math.max(24, Math.min(rect.height * 0.16, 46)) + "px";
-    box.appendChild(mark);
+    var rect = mark.getBoundingClientRect();
+    if (rect.width < 0.5 && rect.height < 0.5) return;
+    if (rect.top < host.top + 48) box.scrollTop += rect.top - host.top - 48;
+    else if (rect.bottom > host.bottom - 36) box.scrollTop += rect.bottom - host.bottom + 36;
+    if (rect.left < host.left + 16) box.scrollLeft += rect.left - host.left - 16;
+    else if (rect.right > host.right - 16) box.scrollLeft += rect.right - host.right + 16;
   }
 
   // ---------------------------------------------------------------- 导航与标签
@@ -512,7 +567,8 @@
 
     var findInput = el("pdfv-find");
     var runFind = function (direction) { find(findInput.value, direction); };
-    findInput.addEventListener("keydown", function (event) {
+    // 中文输入法用回车上屏。这个回车不能拿去查找，否则拼音还没变成汉字就被清掉或搜错。
+    bindImeKey(findInput, function (event) {
       if (event.key === "Escape") { findInput.value = ""; runFind("next"); findInput.blur(); return; }
       if (event.key !== "Enter") return;
       event.preventDefault();
