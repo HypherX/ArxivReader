@@ -775,6 +775,16 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
   font-size: .86em; line-height: 1.6;
 }
 .md pre code { background: transparent; padding: 0; color: inherit; font-size: 1em; }
+/* 阅读样式会把所有代码块改成浅灰底。对话窗口单独用深色底、浅色字，避免灰底灰字。 */
+#messages .md pre, #follow-messages .md pre {
+  background: #172033; color: #f4f7fb; border: 1px solid #314158;
+}
+#messages .md pre code, #follow-messages .md pre code {
+  background: transparent; color: #f4f7fb;
+}
+#messages .md .code-copy, #follow-messages .md .code-copy {
+  color: #d7e2f0; background: transparent; border: 0;
+}
 .md blockquote {
   margin: 9px 0; padding: 5px 13px; border-left: 3px solid var(--accent);
   background: var(--accent-soft); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
