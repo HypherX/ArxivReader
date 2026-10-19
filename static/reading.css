@@ -6,7 +6,7 @@
 .md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 .md th,.md td { border: 1px solid #dce2eb; padding: 8px 12px; min-width: 90px; }
 .md th { background: #f3f6fb; } .md blockquote { margin: 1em 0; border-left: 3px solid #97a9c8; padding: .2em 1em; color: #546480; }
-.md pre { position: relative; white-space: pre; overflow-x: auto; padding: 32px 16px 16px; background: #f3f5f9; border: 1px solid #e2e7ee; border-radius: 8px; }
+.md pre { position: relative; white-space: pre; overflow-x: auto; padding: 32px 16px 16px; background: #f3f5f9; color: #243249; border: 1px solid #e2e7ee; border-radius: 8px; }
 .md pre code { background: none; padding: 0; white-space: pre; }
 .md code { font-size: .9em; } .md .code-copy { position: absolute; top: 5px; right: 8px; font: 11px system-ui; cursor: pointer; }
 .md .katex-display { overflow-x: auto; overflow-y: hidden; padding: .5em 0; max-width: 100%; }

@@ -1746,8 +1746,26 @@
       var selected = list.find(function (s) { return s.id === state.currentSessionId; }) || list[0];
       if (selected) {
         state.currentSessionId = selected.id; sel.value = String(selected.id);
-        if (!preserveMessages) return loadMessages();
-      } else { state.currentSessionId = null; if (!preserveMessages) renderMessages([]); }
+      } else {
+        state.currentSessionId = null;
+        if (!preserveMessages) renderMessages([]);
+      }
+      setSendButton(!!state.streaming);
+      if (selected && !preserveMessages) return loadMessages();
+    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
+  function deleteSession() {
+    if (state.streaming || !state.currentSessionId) return;
+    var sid = state.currentSessionId;
+    askConfirm(function () { return I18n.t("chat.delete_title"); },
+      [function () { return I18n.t("chat.delete_line"); }],
+      { danger: true, okText: function () { return I18n.t("chat.delete_session"); } }).then(function (ok) {
+      if (!ok || state.currentSessionId !== sid) return null;
+      return api.del("/api/sessions/" + sid).then(function () {
+        if (state.currentSessionId === sid) state.currentSessionId = null;
+        toast(function () { return I18n.t("chat.deleted"); }, "ok", 2500);
+        return loadSessions();
+      });
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
   function newSession() {
@@ -1758,6 +1776,7 @@
       return loadSessions(true).then(function () {
         if (!state.currentPaper || state.currentPaper.id !== p.id) return;
         state.currentSessionId = s.id; $("session-select").value = String(s.id); renderMessages([]);
+        setSendButton(false);
       });
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
@@ -1765,27 +1784,148 @@
     if (!state.currentSessionId) { renderMessages([]); return; }
     var sid = state.currentSessionId;
     return api.get("/api/sessions/" + sid + "/messages")
-      .then(function (messages) { if (state.currentSessionId === sid && !state.streaming) renderMessages(messages); })
+      .then(function (messages) {
+        if (state.currentSessionId !== sid || state.streaming) return;
+        if (document.querySelector("#messages .msg-edit")) return;
+        renderMessages(messages);
+      })
       .catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
   function renderMessages(msgs) {
+    state.messages = msgs || [];
     var box = $("messages"); replaceChildren(box);
-    if (!msgs || !msgs.length) {
+    var visible = state.messages.filter(function (m) { return m.role !== "system"; });
+    if (!visible.length) {
       box.appendChild(emptyState("💬", function () { return I18n.t("ui.f5c43014f0a5"); },
         function () { return I18n.t("ui.05536ddcdd77"); }));
       return;
     }
-    msgs.forEach(function (m) {
-      if (m.role === "system") return;
+    var lastId = visible[visible.length - 1].id;
+    visible.forEach(function (m) {
       var node = el("div", { class: "msg " + m.role });
-      setMd(node, m.content);
+      var body = el("div", { class: "msg-body" });
+      setMd(body, m.content);
+      node.appendChild(body);
       if (m.reasoning_content) {
         var block = makeReasoningBlock(node);   // 历史消息默认折叠
         renderReasoning(block, m.reasoning_content, false);
       }
+      node.appendChild(messageActions(m, m.id === lastId));
       box.appendChild(node);
     });
     box.scrollTop = box.scrollHeight;
+  }
+  function copyMessage(text) {
+    Desktop.copy(String(text || "")).then(function () {
+      toast(function () { return I18n.t("chat.copied"); }, "ok", 2000);
+    }, function () { toast(function () { return I18n.t("ui.cbc8618279a5"); }, "err"); });
+  }
+  function messageActions(message, isLast) {
+    var buttons = [el("button", { class: "msg-act", type: "button", text: function () { return I18n.t("chat.copy"); },
+      onclick: function () { copyMessage(message.content); } })];
+    if (message.role === "user") {
+      buttons.push(el("button", { class: "msg-act", type: "button", text: function () { return I18n.t("chat.edit"); },
+        onclick: function (event) {
+          if (state.streaming) stopChat();
+          openMessageEditor(event.currentTarget.closest(".msg"), message);
+        } }));
+    }
+    if (isLast) {
+      buttons.push(el("button", { class: "msg-act", type: "button", text: function () { return I18n.t("chat.regenerate"); },
+        onclick: function () { regenerateTurn(); } }));
+    }
+    return el("div", { class: "msg-actions" }, buttons);
+  }
+  function openMessageEditor(node, message) {
+    if (!node || node.querySelector(".msg-edit")) return;
+    var body = node.querySelector(".msg-body");
+    var actions = node.querySelector(".msg-actions");
+    if (body) body.classList.add("hidden");
+    if (actions) actions.classList.add("hidden");
+    var area = document.createElement("textarea");
+    area.rows = 4;
+    area.value = message.content || "";
+    var editor = el("div", { class: "msg-edit" }, [
+      area,
+      el("div", { class: "msg-actions" }, [
+        el("button", { class: "msg-act", type: "button", text: function () { return I18n.t("chat.edit_cancel"); },
+          onclick: function () { loadMessages(); } }),
+        el("button", { class: "msg-act", type: "button", text: function () { return I18n.t("chat.resend"); },
+          onclick: function () { submitEdit(message, area.value); } }),
+      ]),
+    ]);
+    node.appendChild(editor);
+    area.focus();
+  }
+  function submitEdit(message, raw) {
+    var content = String(raw || "").trim();
+    if (!content || !state.currentSessionId || !message || !message.id) return;
+    var later = (state.messages || []).some(function (m) { return m.id > message.id; });
+    var run = function () {
+      state.messages = (state.messages || []).filter(function (m) { return m.id <= message.id && m.role !== "system"; })
+        .map(function (m) {
+          return m.id === message.id ? { id: m.id, role: "user", content: content, reasoning_content: "" } : m;
+        });
+      renderMessages(state.messages);
+      beginAssistantStream("/api/sessions/" + state.currentSessionId + "/messages/" + message.id + "/edit", { content: content });
+    };
+    if (!later) { run(); return; }
+    askConfirm(function () { return I18n.t("chat.edit_confirm_title"); },
+      [function () { return I18n.t("chat.edit_confirm_line"); }]).then(function (ok) { if (ok) run(); });
+  }
+  function regenerateTurn() {
+    if (state.streaming || !state.currentSessionId) return;
+    var lastUser = null;
+    (state.messages || []).forEach(function (m) { if (m.role === "user") lastUser = m; });
+    if (!lastUser) { toast(function () { return I18n.t("chat.no_user"); }, "err"); return; }
+    state.messages = (state.messages || []).filter(function (m) { return m.id <= lastUser.id; });
+    renderMessages(state.messages);
+    beginAssistantStream("/api/sessions/" + state.currentSessionId + "/regenerate", {});
+  }
+  function beginAssistantStream(url, payload) {
+    var box = $("messages");
+    var ai = el("div", { class: "msg assistant pending" });
+    var answer = el("div", { class: "msg-body answer" });
+    ai.appendChild(answer);
+    box.appendChild(ai);
+    box.scrollTop = box.scrollHeight;
+    var raw = "", rawReasoning = "", reasonBlock = null;
+    state.streaming = true;
+    setSendButton(true);
+    var finish = function (aborted) {
+      ai.classList.remove("pending");
+      state.streaming = false;
+      setSendButton(false);
+      if (aborted) toast(function () { return I18n.t("ui.459a568188e8"); }, "warn", 5000);
+      if (document.querySelector("#messages .msg-edit")) return;
+      loadSessions(true);
+      loadMessages();
+    };
+    streamSSE(url, payload, {
+      kind: "chat",
+      onDelta: function (delta, reasoning) {
+        var nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 90;
+        if (reasoning) {
+          if (!reasonBlock) { reasonBlock = makeReasoningBlock(ai); reasonBlock.wrap.open = true; }
+          rawReasoning += reasoning;
+          renderReasoning(reasonBlock, rawReasoning, true);
+        }
+        if (delta) { raw += delta; setMd(answer, raw, true); }
+        if (nearBottom) requestAnimationFrame(function () { box.scrollTop = box.scrollHeight; });
+      },
+      onDone: function () { finish(false); },
+      onCancelled: function () { finish(true); },
+      onAborted: function () { finish(true); },
+      onError: function (errMsg) {
+        ai.classList.remove("pending");
+        state.streaming = false;
+        setSendButton(false);
+        toast(function () { return I18n.t("ui.cfa7c64f924a") + I18n.value(errMsg); }, "err");
+        if (document.querySelector("#messages .msg-edit")) return;
+        loadSessions(true);
+        loadMessages();
+      },
+    });
   }
   function sendMessage() {
     if (state.streaming) return;
@@ -1802,44 +1942,12 @@
       input.value = "";
       var box = $("messages");
       if (box.querySelector(".empty")) replaceChildren(box);
-      var userNode = el("div", { class: "msg user" }); setMd(userNode, content);
+      var userNode = el("div", { class: "msg user" });
+      var userBody = el("div", { class: "msg-body" });
+      setMd(userBody, content);
+      userNode.appendChild(userBody);
       box.appendChild(userNode);
-      var ai = el("div", { class: "msg assistant pending" });
-      var answer = el("div", { class: "answer" });   // 正文独立节点：推理块要留在同一个气泡里
-      ai.appendChild(answer);
-      box.appendChild(ai); box.scrollTop = box.scrollHeight;
-
-      var raw = "", rawReasoning = "", reasonBlock = null;
-      state.streaming = true; setSendButton(true);
-      var finalize = function (aborted) {
-        ai.classList.remove("pending");
-        if (raw) setMd(answer, aborted ? (raw + I18n.t("ui.c50a64657f2a")) : raw);
-        if (reasonBlock) { renderReasoning(reasonBlock, rawReasoning, false); reasonBlock.wrap.open = false; }
-        state.streaming = false; setSendButton(false);
-        loadSessions(true);
-      };
-      streamChat(sid, content, {
-        kind: "chat",
-        onDelta: function (delta, reasoning) {
-          var nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 90;
-          if (reasoning) {
-            if (!reasonBlock) { reasonBlock = makeReasoningBlock(ai); reasonBlock.wrap.open = true; }
-            rawReasoning += reasoning;
-            renderReasoning(reasonBlock, rawReasoning, true);
-          }
-          if (delta) { raw += delta; setMd(answer, raw, true); }
-          if (nearBottom) requestAnimationFrame(function () { box.scrollTop = box.scrollHeight; });
-        },
-        onDone: function () { finalize(false); },
-        onCancelled: function () { finalize(true); toast(function () { return I18n.t("ui.459a568188e8"); }, "warn", 5000); },
-        onAborted: function () { finalize(true); toast(function () { return I18n.t("ui.459a568188e8"); }, "warn", 5000); },
-        onError: function (errMsg) {
-          ai.classList.remove("pending");
-          if (!raw && !rawReasoning) ai.remove();
-          box.appendChild(el("div", { class: "msg error", text: function () { return I18n.t("ui.cfa7c64f924a") + I18n.value(errMsg); } }));
-          state.streaming = false; setSendButton(false);
-        },
-      });
+      beginAssistantStream("/api/sessions/" + sid + "/messages", { content: content });
     };
 
     if (state.currentSessionId) start(state.currentSessionId);
@@ -1950,6 +2058,7 @@
     btn.classList.toggle("danger", !!streaming);
     I18n.bind(btn, function () { return streaming ? I18n.t("ui.c422f8ba6b25") : I18n.t("ui.edecf0ae6e51"); });
     $("new-session").disabled = !!streaming; $("session-select").disabled = !!streaming;
+    if ($("delete-session")) $("delete-session").disabled = !!streaming || !state.currentSessionId;
     btn.disabled = false;
     I18n.bind(btn, function () { return streaming ? I18n.t("ui.5d7ccf8e00d5") : ""; }, "title");
   }
@@ -2095,7 +2204,10 @@
       bindSeltrHints(s);
       markSettingsAttention(!(s.base_url && s.model && s.has_api_key));
       applyLanguage(s.output_language || "zh");
-      if (!silent) toast(function () { return I18n.t("ui.bd03c0aad701"); }, "ok");
+      if (!silent) {
+        $("settings-modal").classList.add("hidden");
+        toast(function () { return I18n.t("ui.bd03c0aad701"); }, "ok", 2500);
+      }
       return s;
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
@@ -2504,6 +2616,7 @@
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     });
     $("new-session").addEventListener("click", newSession);
+    $("delete-session").addEventListener("click", deleteSession);
     $("session-select").addEventListener("change", function () {
       state.currentSessionId = parseInt($("session-select").value, 10) || null; loadMessages();
     });

@@ -512,7 +512,7 @@
     "ui.82365ba5bc06": ["还没有翻译产物：选好输出方式后点「开始翻译」。", "No translated PDF yet: pick an output mode and start a translation."],
     "ui.a84280a89fc8": ["语言", "Languages"],
     "ui.6cf2ac6561ef": ["划词翻译（选中文字）", "Selection translation (highlighted text)"],
-    "ui.af663d503a06": ["划词翻译调用频繁，建议单独配一个便宜的模型；字段留空即跟随上方主设置；已保存的自定义 Key 输入 default 可清除。", "Selection translation is called frequently — consider a cheaper model. Empty fields follow the main settings above; type default in the Key field to clear a saved custom key."],
+    "ui.af663d503a06": ["划词翻译调用频繁，建议单独配一个便宜的模型；字段留空即跟随对话 LLM；已保存的自定义 Key 输入 default 可清除。", "Selection translation is called frequently — consider a cheaper model. Empty fields follow the chat model; type default in the Key field to clear a saved custom key."],
     "ui.c818e3d8ae98": ["已设置自定义 Key：", "Custom key set: "],
     "ui.4597519e0ad4": ["未设置自定义 Key（跟随主设置）", "No custom key (following main settings)"],
     "ui.8fa5a7efaadd": ["当前生效：", "Effective: "],
@@ -595,7 +595,24 @@
     "sync.hash_mismatch": ["云端文件校验失败：{path}", "Cloud file check failed: {path}"],
     "sync.files_busy": ["资料文件正在被占用，请关闭打开的 PDF 后重试。{message}", "Files are in use. Close open PDFs and try again. {message}"],
     "sync.no_library": ["这台电脑还没有文献库", "This computer has no library yet"],
-    "sync.confirm_required": ["请先确认再用云端资料替换本地", "Confirm before replacing local files with the cloud backup"]
+    "sync.confirm_required": ["请先确认再用云端资料替换本地", "Confirm before replacing local files with the cloud backup"],
+    "settings.chat_llm": ["对话 LLM", "Chat model"],
+    "settings.seltr_model_ph": ["留空：跟随对话 LLM", "Blank = follow the chat model"],
+    "settings.seltr_url_ph": ["留空：跟随对话 LLM", "Blank = follow the chat model"],
+    "settings.seltr_key_ph": ["留空：不修改；未设置则跟随对话 LLM", "Blank = keep saved; otherwise follow the chat model"],
+    "chat.copy": ["复制", "Copy"],
+    "chat.copied": ["已复制", "Copied"],
+    "chat.edit": ["编辑", "Edit"],
+    "chat.edit_cancel": ["取消", "Cancel"],
+    "chat.resend": ["重新发送", "Send again"],
+    "chat.regenerate": ["重新生成", "Regenerate"],
+    "chat.delete_session": ["删除这页对话", "Delete this chat"],
+    "chat.delete_title": ["删除这页对话", "Delete this chat"],
+    "chat.delete_line": ["这页对话里的提问和回复会一并删除。", "Questions and replies in this chat will be deleted."],
+    "chat.deleted": ["已删除这页对话", "Chat deleted"],
+    "chat.edit_confirm_title": ["从这里重新开始", "Start over from here"],
+    "chat.edit_confirm_line": ["这条之后的回复会被丢掉，再用修改后的内容重新生成。", "Replies after this message are discarded, then a new reply is generated."],
+    "chat.no_user": ["这页对话还没有可以重新生成的提问", "This chat has no question to regenerate"]
   };
   Object.keys(extra).forEach(function (key) { MESSAGES[key] = extra[key]; });
   var language = "zh", bindings = new Map(), channel;

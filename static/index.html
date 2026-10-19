@@ -169,6 +169,7 @@
 <div class="chat-head-actions">
 <select data-i18n-title="ui.1115a951ea4a" id="session-select" title="切换会话"></select>
 <button class="mini" data-i18n-title="ui.58e21b8737cc" id="new-session" title="新建会话">＋</button>
+<button class="mini danger" data-i18n-title="chat.delete_session" id="delete-session" title="删除这页对话">🗑</button>
 </div>
 </div>
 <div class="ai-actions" id="ai-actions">
@@ -233,12 +234,15 @@
 <div class="modal-card">
 <div class="modal-head"><span data-i18n="ui.6bf5b453adcb">LLM 设置（OpenAI 兼容）</span><button class="mini" data-close="settings-modal">✕</button></div>
 <div class="modal-body">
+<details class="settings-module" id="chat-llm-section" open>
+<summary data-i18n="settings.chat_llm">对话 LLM</summary>
+<div class="module-body">
 <label><span data-i18n="ui.0703309cb1bb">输出语言</span><select id="set-language"><option data-i18n="ui.72726d8818f6" value="zh">中文</option><option value="en">English</option></select></label>
 <label>API Base URL<input id="set-base-url" placeholder="https://api.openai.com/v1" type="text"/></label>
 <label>API Key<input autocomplete="off" data-i18n-placeholder="ui.4527d959b5ad" id="set-api-key" placeholder="留空表示不修改" type="password"/></label>
 <div class="hint" id="key-hint"></div>
 <label><span data-i18n="ui.cb2f1709f983">模型名称</span><input id="set-model" placeholder="gpt-4o-mini / qwen-plus / deepseek-chat" type="text"/></label>
-<details><summary data-i18n="ui.a42c8d6a892a">高级参数</summary>
+<details class="settings-advanced"><summary data-i18n="ui.a42c8d6a892a">高级参数</summary>
 <div class="row">
 <label>temperature<input id="set-temperature" max="2" min="0" step="0.1" type="number"/></label>
 <label>max_tokens<input id="set-max-tokens" min="1" step="256" type="number"/></label>
@@ -249,16 +253,22 @@
 <label><span data-i18n="ui.e814e078437b">超时（秒）</span><input id="set-timeout" max="3600" min="5" type="number"/></label>
 <label><span data-i18n="ui.9f28a8874c78">重试次数</span><input id="set-retries" max="10" min="0" type="number"/></label>
 </div>
-<p class="hint" data-i18n="ui.18da2d39aabe">采样参数留空时使用模型服务默认值。</p></details>
-<details id="seltr-section"><summary data-i18n="ui.6cf2ac6561ef">划词翻译（选中文字）</summary>
-<p class="hint" data-i18n="ui.af663d503a06">划词翻译调用频繁，建议单独配一个便宜的模型；字段留空即跟随上方主设置。</p>
-<label><span data-i18n="ui.b2894e9efd28">翻译模型</span><input autocomplete="off" data-i18n-placeholder="ui.ef92f7e1fe4a" id="seltr-model" placeholder="留空：跟随主设置" type="text"/></label>
-<label><span data-i18n="ui.173ea9bc405f">Base URL</span><input autocomplete="off" data-i18n-placeholder="ui.4eeb4bce0cf9" id="seltr-base-url" placeholder="留空：跟随主设置" type="text"/></label>
-<label><span data-i18n="ui.53157b66d477">翻译 API Key</span><input autocomplete="off" data-i18n-placeholder="ui.8a14d9df4610" id="seltr-api-key" placeholder="留空：不修改；未设置则跟随主设置" type="password"/></label>
+<p class="hint" data-i18n="ui.18da2d39aabe">采样参数留空时使用模型服务默认值。</p>
+</details>
+</div>
+</details>
+<details class="settings-module" id="seltr-section"><summary data-i18n="ui.6cf2ac6561ef">划词翻译（选中文字）</summary>
+<div class="module-body">
+<p class="hint" data-i18n="ui.af663d503a06">划词翻译调用频繁，建议单独配一个便宜的模型；字段留空即跟随对话 LLM。</p>
+<label><span data-i18n="ui.b2894e9efd28">翻译模型</span><input autocomplete="off" data-i18n-placeholder="settings.seltr_model_ph" id="seltr-model" placeholder="留空：跟随对话 LLM" type="text"/></label>
+<label><span data-i18n="ui.173ea9bc405f">Base URL</span><input autocomplete="off" data-i18n-placeholder="settings.seltr_url_ph" id="seltr-base-url" placeholder="留空：跟随对话 LLM" type="text"/></label>
+<label><span data-i18n="ui.53157b66d477">翻译 API Key</span><input autocomplete="off" data-i18n-placeholder="settings.seltr_key_ph" id="seltr-api-key" placeholder="留空：不修改；未设置则跟随对话 LLM" type="password"/></label>
 <div class="hint" id="seltr-key-hint"></div>
 <div class="hint" id="seltr-effective"></div>
+</div>
 </details>
-<details id="pdftr-section"><summary data-i18n="ui.5b1989d07180">全文翻译（PDF）</summary>
+<details class="settings-module" id="pdftr-section"><summary data-i18n="ui.5b1989d07180">全文翻译（PDF）</summary>
+<div class="module-body">
 <p class="hint" data-i18n="ui.f35dbe62c5c3">引擎为 pdf2zh_next，首次翻译时按需安装到独立目录，不影响主程序。</p>
 <label><span data-i18n="ui.cba889583751">翻译服务</span><select id="pdftr-service"></select></label>
 <label><span data-i18n="ui.b2894e9efd28">翻译模型</span><input autocomplete="off" data-i18n-placeholder="ui.ef92f7e1fe4a" id="pdftr-model" placeholder="留空：跟随主模型或服务默认" type="text"/></label>
@@ -281,7 +291,7 @@
 <option data-i18n="ui.20fd331e34cc" value="TB">原文/译文交替页</option>
 </select></label>
 </div>
-<details><summary data-i18n="ui.429643af2b94">高级选项</summary>
+<details class="settings-advanced"><summary data-i18n="ui.429643af2b94">高级选项</summary>
 <div class="row pdftr-flags">
 <label><input id="pdftr-dual-first" type="checkbox"/><span data-i18n="ui.e4bc6a75f9ec">对照版译文在前</span></label>
 <label><input id="pdftr-table" type="checkbox"/><span data-i18n="ui.a0eadba4e6f2">翻译表格文字</span></label>
@@ -290,6 +300,7 @@
 <label><input id="pdftr-mirror" type="checkbox"/><span data-i18n="ui.54da9e441de4">安装引擎时使用国内镜像</span></label>
 </div>
 </details>
+</div>
 </details>
 <p class="hint" data-i18n="ui.5c3eddea3976">测试连接会发送一次模型请求，可能计费；不会自动保存设置。</p>
 <div class="hidden" id="desktop-storage"><p class="hint" id="storage-path"></p><button class="ghost" data-i18n="ui.f2ec38914b2d" id="storage-open">打开资料目录</button><button class="ghost" data-i18n="ui.ae4217e96d7d" id="storage-select">选择已有资料库</button><p class="hint" data-i18n="ui.ab12b2196651">切换资料库将在下次启动生效，不移动或删除原有资料。</p></div>
