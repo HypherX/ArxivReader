@@ -1,8 +1,10 @@
 <div align="center">
 
-# ArxivReader
+# 📚 ArxivReader
 
 Read papers, ask questions, and organise a library into folders and a relationship graph. Everything stays on your computer.
+
+📖 Read the PDF · 💬 Ask follow-ups · 🌳 Classify · ☁️ Sync to a new computer
 
 [中文](README.md) · [English](README.en.md)
 
@@ -10,9 +12,9 @@ Read papers, ask questions, and organise a library into folders and a relationsh
 
 ArxivReader is a local paper reader. Add an arXiv paper or your own PDF, read it, translate a selection or the whole file, and use a model you configure for summaries, classification, deep reading, and relationships. There is no account to register and no server to deploy.
 
-## Getting started
+## 🚀 Getting started
 
-### Desktop app
+### 🍎 Desktop app
 
 Download a zip from [Releases](https://github.com/HypherX/ArxivReader/releases). The published desktop build is for Apple Silicon Macs: `ArxivReader-macOS-arm64.zip`.
 
@@ -20,7 +22,7 @@ Unzip it, drag `ArxivReader.app` into Applications, and open it. If macOS says t
 
 On other systems, run from source as below, or build the desktop app yourself.
 
-### Run from source
+### 💻 Run from source
 
 Python 3.12 or newer:
 
@@ -31,7 +33,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 
 Open <http://127.0.0.1:8765>. For a desktop window, install the extra packages in `requirements-build.txt` and run `python desktop.py`.
 
-### Configure a model
+### ⚙️ Configure a model
 
 The first launch opens Settings. Three fields are enough:
 
@@ -43,40 +45,42 @@ The first launch opens Settings. Three fields are enough:
 
 The library and the PDF reader work without a model. Summaries, classification, deep reading, chat, and translation become available after you save one.
 
-## How to use it
+## ✨ How to use it
 
-### Add papers
+### 📥 Add papers
 
-- **arXiv**: paste a link or an id such as `2401.12345`. The PDF is downloaded and the text is extracted.
-- **Local PDF**: upload a file. The same file is recognised by its contents, so it is not added twice.
-- **Related papers**: the app reads Related Work and the references, then judges relevance from abstracts. A paper you keep is added only to **All papers**. Summary and classification stay separate.
+- 🔗 **arXiv**: paste a link or an id such as `2401.12345`. The PDF is downloaded and the text is extracted.
+- 📤 **Local PDF**: upload a file. The same file is recognised by its contents, so it is not added twice.
+- 🧲 **Related papers**: the app reads Related Work and the references, then judges relevance from abstracts. A paper you keep is added only to **All papers**. Summary and classification stay separate.
 
 A new paper stays in **All papers** until you classify it or move it into a folder you created. Selecting a folder also shows the papers in its subfolders.
 
-### Read and translate
+### 📖 Read and translate
 
-Page through the PDF, zoom, and search. Search highlights each match and lets you step through them. Selected text can be copied.
+Page through the PDF and zoom. Selected text can be copied.
 
-Selection translation appears in the panel beside the reader. Full-text translation produces a Chinese PDF, either bilingual or translation-only, and keeps formulas and figures in place. The translation engine is large, so it is installed the first time you use it.
+- 🖍 **Selection translation** appears in the panel beside the reader. You can translate several passages and copy any of them.
+- 🌐 **Full-text translation** produces a Chinese PDF, either bilingual or translation-only, and keeps formulas and figures in place. The engine is large, so it is installed the first time you use it.
+- 🔎 **Find** highlights each match and lets you step through them.
 
 The interface can be switched between Chinese and English.
 
-### Summaries, classification, deep reading, and chat
+### 🧠 Summaries, classification, deep reading, and chat
 
 Four actions are independent. Running one again replaces its previous result.
 
-- **Quick summary** — a short reading note.
-- **Classify** — requires a quick summary first. The paper is filed under a topic that matches it, rather than dropped into a broad folder that already exists, and rather than a folder named after one paper. Running it again moves the paper. A topic folder with no papers left is removed.
-- **Deep reading** — a longer reading note.
-- **Relationships** — requires deep reading and classification first. The result is a graph you can click. One paper shows its own links; a folder shows the links inside that branch.
+- 🧾 **Quick summary** — a short reading note.
+- 🗂 **Classify** — requires a quick summary first. The paper is filed under a topic that matches it, rather than dropped into a broad folder that already exists, and rather than a folder named after one paper. Running it again moves the paper. A topic folder with no papers left is removed.
+- 📖 **Deep reading** — a longer reading note.
+- 🕸 **Relationships** — requires deep reading and classification first. The result is a graph you can click. One paper shows its own links; a folder shows the links inside that branch.
 
-You can keep asking questions on the quick-summary page and on the deep-reading page. The question stays on that page. Chat pages are separate: a new page is a new conversation and does not include other windows. Chat and deep reading use the full PDF, including appendices.
+💬 You can keep asking questions on the quick-summary page and on the deep-reading page. The question stays on that page. Chat pages are separate: a new page is a new conversation and does not include other windows. Chat and deep reading use the full PDF, including appendices.
 
-Papers in one folder can also be gathered into a review.
+📄 Papers in one folder can also be gathered into a review.
 
 These actions use the model you configured, and the paper is sent to that service.
 
-## Full-text translation
+## 🌐 Full-text translation
 
 Full-text translation uses [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate-next). Its dependencies are large, so they are not part of the app and not listed in `requirements.txt`.
 
@@ -87,24 +91,24 @@ The installer prefers [uv](https://docs.astral.sh/uv/). Without uv, a source che
 
 The translation model follows your main model unless you choose another one on that same settings page. The engine and translated PDFs live in `pdftranslate/` inside the data directory. Deleting that folder uninstalls the engine.
 
-## Where your data lives
+## 📁 Where your data lives
 
 | How you run it | Data directory |
 |---|---|
-| Desktop app (macOS) | `~/Library/Application Support/ArxivReader/data/` |
-| Desktop app (Windows) | `%LOCALAPPDATA%/ArxivReader/data/` |
-| From source | `data/` in the project |
+| 🍎 Desktop app (macOS) | `~/Library/Application Support/ArxivReader/data/` |
+| 🪟 Desktop app (Windows) | `%LOCALAPPDATA%/ArxivReader/data/` |
+| 💻 From source | `data/` in the project |
 
 PDFs, the database, and notes are all in that folder. Quit the app, then copy the folder to make a backup.
 
 The API key is stored in the local database in plain text. Do not share `data/`. Downloading from arXiv needs a network connection. Model use is billed by your provider and follows that provider's data policy.
 
-## Cloud sync
+## ☁️ Cloud sync
 
 **Cloud sync** in the top bar backs up the library and restores it on another computer. Pick one backend:
 
-- **Google Drive** — paste the OAuth Client ID and Secret from your own Google Cloud project, then connect once.
-- **WebDAV** — Nutstore, Nextcloud, ownCloud, Synology, and similar servers. Enter the server URL, account, and an app password.
+- 🟢 **Google Drive** — paste the OAuth Client ID and Secret from your own Google Cloud project, then connect once.
+- 🔌 **WebDAV** — Nutstore, Nextcloud, ownCloud, Synology, and similar servers. Enter the server URL, account, and an app password.
 
 Nutstore:
 
@@ -115,11 +119,11 @@ Nutstore:
 
 Unchanged files are skipped. A restore keeps a copy of the current local data, and a failed check does not replace it. The cloud copy does not include API keys or sync passwords. Only HTTPS addresses are accepted, aside from loopback addresses used for local testing.
 
-## License
+## 📜 License
 
 ArxivReader is open source under the [MIT License](LICENSE). You can use, modify, and distribute it freely.
 
-## Acknowledgements
+## 🙏 Acknowledgements
 
 Thanks to these projects:
 
