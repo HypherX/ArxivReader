@@ -148,6 +148,32 @@ Two things worth knowing:
 
 ---
 
+## ☁️ Cloud sync
+
+Click **☁️ Cloud sync** in the top bar to back up the whole library (PDFs, database, notes) to the cloud and restore it on a new machine. Two backends are available — pick one:
+
+| Backend | Best for | Setup |
+|---|---|---|
+| **Google Drive** | You have a Google account | Paste the OAuth Client ID / Secret from your own Google Cloud project, then connect once to authorise |
+| **WebDAV** (Nutstore, Nextcloud…) | Zotero-style self-chosen server | Enter the server URL, account and an app password, then connect |
+
+Example with **Nutstore (坚果云)** — the same setup as Zotero:
+
+1. On the Nutstore website go to **Account → Security → Third-party apps** and create an **app password** (not your login password);
+2. In the sync window, open the **WebDAV** tab, set the server to `https://dav.jianguoyun.com/dav/`, enter your Nutstore email and the app password;
+3. The backup folder defaults to `ArxivReader` (a folder at the WebDAV root) and can be customised, e.g. `我的坚果云/ArxivReader`;
+4. **Connect**, then use **Upload** / **Restore**.
+
+Other WebDAV services (Nextcloud, ownCloud, Synology, …) work the same way — just use their DAV URL.
+
+Notes:
+
+- Uploads skip files whose content is unchanged; before a restore, your current local data is kept as a backup, every downloaded file is hash-verified, and a failed restore never touches local data.
+- The cloud copy contains **no API keys and no sync passwords** (those stay on your machine under `sync/`, with 0600 permissions).
+- Only HTTPS URLs are accepted (except loopback for local testing) so credentials are never sent in plain text.
+
+---
+
 ## ❓ FAQ
 
 <details>

@@ -1111,10 +1111,17 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
 .pdftr-flags input[type="checkbox"] { margin: 0; }
 #pdftr-key-hint { margin-top: 2px; }
 
-/* Google Drive 同步 */
+/* 云同步（Google Drive / WebDAV） */
 .modal-card.sync-card { width: 560px; }
 .sync-steps { margin: 8px 0 14px; padding-left: 18px; color: var(--text-soft); font-size: 12px; line-height: 1.6; }
 .sync-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.sync-tabs { display: flex; gap: 6px; margin: 4px 0 14px; border-bottom: 1px solid var(--border); }
+.sync-tab {
+  background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+  color: var(--text-soft); cursor: pointer; font-size: 13px; padding: 6px 10px; margin-bottom: -1px;
+}
+.sync-tab:hover { color: var(--text); }
+.sync-tab.active { color: var(--text); border-bottom-color: var(--accent, #4f7cff); font-weight: 600; }
 .sync-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
 .sync-stat {
   background: var(--panel-soft); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px;

@@ -1,4 +1,8 @@
-"""同步任务：同一时间只跑一个，界面轮询进度。"""
+"""同步任务：同一时间只跑一个，界面轮询进度。
+
+后端二选一（sync/provider 文件记录）：Google Drive（OAuth）或 WebDAV（坚果云等，
+账号 + 应用密码）。两家的凭据各自独立保存，保存哪家的配置就把哪家设为当前后端。
+"""
 
 import json
 import logging
@@ -8,7 +12,7 @@ import threading
 
 from harness import config
 
-from . import credentials, google_drive, inventory
+from . import credentials, google_drive, inventory, webdav
 from .errors import SyncError, public_message
 
 logger = logging.getLogger(__name__)
@@ -84,15 +88,45 @@ def save_client(client_id, client_secret):
             creds[key] = ""
     creds["client_id"] = client_id
     credentials.save(creds)
+    credentials.set_provider("google")
+    return creds
+
+
+def save_webdav_config(url, username, password, base_path):
+    """保存 WebDAV 配置并设为当前后端；密码留空表示沿用已保存的。"""
+    if not isinstance(password, str):
+        raise SyncError("sync.webdav_invalid", status=422)
+    url, username, base_path = webdav.validate_config(url, username, base_path)
+    password = password.strip()
+    if password and (len(password) > 256):
+        raise SyncError("sync.webdav_invalid", status=422)
+    creds = credentials.load_webdav()
+    changed = creds.get("url") != url or creds.get("username") != username
+    if password:
+        creds["password"] = password
+    elif changed or not creds.get("password"):
+        # 换了服务器/账号后旧密码无意义，必须重新给
+        if changed:
+            creds["password"] = ""
+        raise SyncError("sync.webdav_invalid", status=422)
+    creds.update({"url": url, "username": username, "base_path": base_path})
+    credentials.save_webdav(creds)
+    credentials.set_provider("webdav")
     return creds
 
 
 def disconnect():
     _ensure_idle()
-    creds = credentials.load()
-    creds["refresh_token"] = ""
-    creds["email"] = ""
-    credentials.save(creds)
+    provider = credentials.get_provider()
+    if provider == "webdav":
+        creds = credentials.load_webdav()
+        creds["password"] = ""
+        credentials.save_webdav(creds)
+    else:
+        creds = credentials.load()
+        creds["refresh_token"] = ""
+        creds["email"] = ""
+        credentials.save(creds)
 
 
 def _ensure_idle():
@@ -102,6 +136,12 @@ def _ensure_idle():
 
 
 def _require_configured():
+    provider = credentials.get_provider()
+    if provider == "webdav":
+        creds = credentials.load_webdav()
+        if not creds.get("url") or not creds.get("username"):
+            raise SyncError("sync.not_configured")
+        return creds
     creds = credentials.load()
     if not creds.get("client_id") or not creds.get("client_secret"):
         raise SyncError("sync.not_configured")
@@ -109,10 +149,27 @@ def _require_configured():
 
 
 def _require_connected():
+    provider = credentials.get_provider()
+    if provider == "webdav":
+        creds = credentials.load_webdav()
+        if not creds.get("url") or not creds.get("username") or not creds.get("password"):
+            raise SyncError("sync.not_connected")
+        return creds
     creds = _require_configured()
     if not creds.get("refresh_token"):
         raise SyncError("sync.not_connected")
     return creds
+
+
+def _make_store():
+    """按当前后端构造 store；调用方负责 close。"""
+    provider = credentials.get_provider()
+    if provider == "webdav":
+        creds = credentials.load_webdav()
+        return webdav.WebDavStore(creds.get("url"), creds.get("username"),
+                                  creds.get("password"), creds.get("base_path"))
+    creds = credentials.load()
+    return google_drive.GoogleStore(creds, credentials.credential_path())
 
 
 def _remember_cloud(manifest):
@@ -123,15 +180,16 @@ def _remember_cloud(manifest):
 
 def refresh_cloud():
     global _CLOUD_ERROR
-    creds = credentials.load()
-    if not creds.get("refresh_token"):
+    provider = credentials.get_provider()
+    connected = bool(credentials.load().get("refresh_token")) if provider == "google" \
+        else bool(provider == "webdav" and credentials.load_webdav().get("password"))
+    if not connected:
         _CLOUD_ERROR = None
         state = _load_state()
         state["cloud"] = None
         _save_state(state)
         return
-    path = credentials.credential_path()
-    store = google_drive.GoogleStore(creds, path)
+    store = _make_store()
     try:
         manifest = store.load_manifest()
         if manifest is not None:
@@ -169,17 +227,34 @@ def public_job():
 
 
 def status():
-    creds = credentials.load()
+    provider = credentials.get_provider()
+    google = credentials.load()
+    dav = credentials.load_webdav()
+    if provider == "webdav":
+        configured = bool(dav.get("url") and dav.get("username"))
+        connected = configured and bool(dav.get("password"))
+        account = dav.get("username") or ""
+    else:
+        configured = bool(google.get("client_id") and google.get("client_secret"))
+        connected = bool(google.get("refresh_token"))
+        account = google.get("email") or ""
     state = _load_state()
     cloud = state.get("cloud")
     if not isinstance(cloud, dict):
         cloud = None
     return {
-        "configured": bool(creds.get("client_id") and creds.get("client_secret")),
-        "connected": bool(creds.get("refresh_token")),
-        "email": creds.get("email") or "",
-        "client_id": creds.get("client_id") or "",
-        "has_client_secret": bool(creds.get("client_secret")),
+        "provider": provider or "google",
+        "configured": configured,
+        "connected": connected,
+        "email": account,
+        "client_id": google.get("client_id") or "",
+        "has_client_secret": bool(google.get("client_secret")),
+        "webdav": {
+            "url": dav.get("url") or "",
+            "username": dav.get("username") or "",
+            "base_path": dav.get("base_path") or webdav.DEFAULT_BASE_PATH,
+            "has_password": bool(dav.get("password")),
+        },
         "local": inventory.summarize_local(config.get_base_dir()),
         "cloud": cloud,
         "cloud_error": _CLOUD_ERROR,
@@ -249,6 +324,22 @@ def start_connect():
     if library_busy():
         raise SyncError("sync.busy", status=409)
 
+    if credentials.get_provider() == "webdav":
+        def work_webdav(job, cancel):
+            if cancel.is_set():
+                raise SyncError("sync.cancelled")
+            store = _make_store()
+            try:
+                store.check_connection()
+            finally:
+                store.close()
+            try:
+                refresh_cloud()
+            except SyncError:
+                logger.info("已连接 WebDAV，但暂时读不到云端备份")
+
+        return _start("connect", work_webdav)
+
     def work(job, cancel):
         creds = credentials.load()
         path = credentials.credential_path()
@@ -269,9 +360,7 @@ def start_push():
     def work(job, cancel):
         if library_busy():
             raise SyncError("sync.busy", status=409)
-        creds = credentials.load()
-        path = credentials.credential_path()
-        store = google_drive.GoogleStore(creds, path)
+        store = _make_store()
         try:
             manifest = inventory.push_library(config.get_base_dir(), store, _progress(job), cancel)
             _remember_cloud(manifest)
@@ -287,9 +376,7 @@ def start_pull():
         raise SyncError("sync.busy", status=409)
 
     def work(job, cancel):
-        creds = credentials.load()
-        path = credentials.credential_path()
-        store = google_drive.GoogleStore(creds, path)
+        store = _make_store()
         try:
             manifest = inventory.pull_library(config.get_base_dir(), store, _progress(job), cancel)
             _remember_cloud(manifest)
