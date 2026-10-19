@@ -82,12 +82,19 @@ class PaperOut(BaseModel):
 
 
 # ---------------- Chat ----------------
+class SessionCreate(BaseModel):
+    """chat 每次新建一页空白对话。summary / deep_reading 复用该产物自己的追问页。"""
+
+    scope: str = "chat"
+
+
 class SessionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     paper_id: int
     title: str
+    scope: str = "chat"
     created_at: Optional[datetime.datetime] = None
 
 

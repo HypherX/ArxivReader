@@ -13,8 +13,7 @@ for directory in ("static", "harness/prompts/zh", "harness/prompts/en"):
     for path in (root / directory).rglob("*"):
         if path.is_file() and path.name != ".DS_Store" and "__pycache__" not in path.parts:
             datas.append((str(path), str(path.parent.relative_to(root))))
-datas += [(str(root / "THIRD_PARTY_NOTICES.txt"), "."),
-          (str(generated / "build-info.json"), ".")]
+datas += [(str(generated / "build-info.json"), ".")]
 for relative in json.loads((generated / "license-manifest.json").read_text(encoding="utf-8")):
     datas.append((str(generated / relative), str(Path(relative).parent)))
 datas += collect_data_files("webview")

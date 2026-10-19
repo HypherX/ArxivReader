@@ -175,9 +175,13 @@ def _step_tree(db: Session, paper: Paper, *, force: bool, settings: Any,
                    nodes[0] if nodes else None)
     # 方向树 -> 文件夹树镜像（左侧面板即方向树）+ 把论文挂到 primary 方向文件夹 + 刷新图谱 md
     exported = store.refresh_nodes(db, nodes, move_paper=paper, move_paper_node=primary)
+    removed = store.prune_empty_directions(db)
+    detail = choose(hcfg, "归入 {} 个方向节点：{}", "Assigned to {} node: {}").format(
+        len(created), "；".join((row.node.path if row.node else "") for row in created))
+    if removed:
+        detail += choose(hcfg, "；已删除空类别：{}", "; removed empty categories: {}").format("、".join(removed))
     return {"status": "done",
-            "detail": choose(hcfg, "归入 {} 个方向节点：{}", "Assigned to {} node: {}").format(
-                len(created), "；".join((row.node.path if row.node else "") for row in created)),
+            "detail": detail,
             "memberships": [{"node_id": row.node_id, "path": row.node.path if row.node else "",
                              "role": row.role, "reason": row.reason,
                              "confidence": row.confidence} for row in created],

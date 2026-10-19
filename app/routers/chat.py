@@ -2,8 +2,7 @@
 
 Agent Harness 接线（本层不含任何 prompt 拼接）：
   - 规则 prompt、论文材料、历史裁剪都由 harness.chat 装配；
-  - 回答前模型可按需调用论文工具（search_text / read_section / read_page / get_outline）取证，
-    工具走 OpenAI function calling（tools 参数），不写进 prompt。
+  - 不向模型提供工具。对话、快速总结追问、深度精读追问各用自己的会话，历史不交叉。
 
 SSE 帧统一为 `data: {json}\n\n`，json 内 type ∈ {delta, tool, error, cancelled, done}：
   delta     : {"text": 增量正文, "reasoning": 增量推理内容}   # 推理模型下两者都有
@@ -25,7 +24,7 @@ import logging
 import threading
 from typing import Any, Dict, Iterator, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -36,6 +35,10 @@ from harness.language import choose
 
 from .. import database, schemas, settings_store
 from ..models import ChatMessage, ChatSession, Paper
+from knowledge import store as knowledge_store
+
+_SCOPES = ("chat", "summary", "deep_reading")
+_SCOPE_ARTIFACT = {"summary": knowledge_store.ARTIFACT_SUMMARY, "deep_reading": knowledge_store.ARTIFACT_DEEP}
 
 logger = logging.getLogger(__name__)
 
@@ -170,11 +173,32 @@ def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
 
 
 # ---------------- 会话管理 ----------------
+def _scope(value: Optional[str]) -> str:
+    scope = (value or "chat").strip()
+    if scope not in _SCOPES:
+        raise HTTPException(status_code=400, detail="未知对话窗口")
+    return scope
+
+
 @router.post("/papers/{paper_id}/sessions", response_model=schemas.SessionOut, status_code=201)
-def create_session(paper_id: int, db: Session = Depends(database.get_db)):
+def create_session(paper_id: int, body: Optional[schemas.SessionCreate] = None,
+                   db: Session = Depends(database.get_db)):
     if db.get(Paper, paper_id) is None:
         raise HTTPException(status_code=404, detail="论文不存在")
-    session = ChatSession(paper_id=paper_id, title=choose(settings_store.get_harness_settings(db), "新对话", "New chat"))
+    scope = _scope(body.scope if body else "chat")
+    if scope != "chat":
+        existing = (db.query(ChatSession)
+                    .filter(ChatSession.paper_id == paper_id, ChatSession.scope == scope)
+                    .order_by(ChatSession.id.desc())
+                    .first())
+        if existing is not None:
+            return existing
+    titles = {
+        "summary": ("快速总结", "Quick summary"),
+        "deep_reading": ("深度精读", "Deep reading"),
+    }
+    title = choose(settings_store.get_harness_settings(db), *(titles.get(scope) or ("新对话", "New chat")))
+    session = ChatSession(paper_id=paper_id, title=title, scope=scope)
     db.add(session)
     db.commit()
     db.refresh(session)
@@ -182,9 +206,11 @@ def create_session(paper_id: int, db: Session = Depends(database.get_db)):
 
 
 @router.get("/papers/{paper_id}/sessions", response_model=List[schemas.SessionOut])
-def list_sessions(paper_id: int, db: Session = Depends(database.get_db)):
+def list_sessions(paper_id: int, scope: str = Query("chat"), db: Session = Depends(database.get_db)):
+    """默认只列出普通对话页。总结和精读的追问要通过对应的 scope 单独取。"""
+    scope = _scope(scope)
     return (db.query(ChatSession)
-            .filter(ChatSession.paper_id == paper_id)
+            .filter(ChatSession.paper_id == paper_id, ChatSession.scope == scope)
             .order_by(ChatSession.created_at.desc(), ChatSession.id.desc())
             .all())
 
@@ -238,7 +264,17 @@ def _stream_reply(session_id: int, user_message_id: int, token: Optional[str], g
         history = [{"role": m.role, "content": m.content}
                    for m in session.messages
                    if m.id < user_message_id and m.role in ("user", "assistant")]
-        messages, _info = harness_chat.build_chat_messages(paper, history, content, cfg=cfg)
+        if session.scope in _SCOPE_ARTIFACT:
+            artifact = knowledge_store.get_artifact(db, paper.id, _SCOPE_ARTIFACT[session.scope])
+            if artifact is None or not (artifact.content_md or "").strip():
+                def _missing_artifact() -> Iterator[str]:
+                    yield _sse({"type": "error", "message": "还没有可以追问的结果"})
+                    yield _sse({"type": "done", "message_id": None, "full_text": ""})
+                return StreamingResponse(_missing_artifact(), media_type="text/event-stream", headers=_SSE_HEADERS)
+            messages, _info = harness_chat.build_followup_messages(
+                paper, history, content, artifact.content_md, scope=session.scope, cfg=cfg)
+        else:
+            messages, _info = harness_chat.build_chat_messages(paper, history, content, cfg=cfg)
         tools = harness_chat.build_chat_tools(paper, cfg)
         rounds = harness_chat.max_tool_rounds(cfg)
     finally:

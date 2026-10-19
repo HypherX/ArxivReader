@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT))
 from tools.build_desktop import VERSION
 
 INCLUDE_FILES = (
-    "ArxivReader.spec", "README.md", "README.en.md", "THIRD_PARTY_NOTICES.txt",
+    "ArxivReader.spec", "LICENSE", "README.md", "README.en.md",
     "desktop.py", "desktop_native.py", "requirements.txt", "requirements-build.txt",
     ".gitignore",
 )

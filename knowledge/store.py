@@ -20,7 +20,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from harness.config import get_base_dir
-from app.models import (DirectionNode, Folder, FolderReview, NodeSynthesis, Paper,
+from app.models import (ChatSession, DirectionNode, Folder, FolderReview, NodeSynthesis, Paper,
                         PaperArtifact, PaperArtifactVersion, PaperDirection, PaperRelation, PipelineRun,
                         RelatedCandidate, RelatedRun)
 
@@ -122,7 +122,7 @@ def set_paper_memberships(db: Session, paper: Paper, memberships: Sequence[Dict[
     if not math.isfinite(confidence) or not 0 <= confidence <= 1:
         raise ValueError("分类置信度必须在 0～1 之间")
     try:
-        node = node or get_or_create_node(db, path, commit=False)
+        node = _resolve_membership_node(db, node, path)
         folder = sync_node_folders(db, node, commit=False)
         row = db.query(PaperDirection).filter_by(paper_id=paper.id).first()
         old_id = row.node_id if row else None
@@ -149,6 +149,25 @@ def set_paper_memberships(db: Session, paper: Paper, memberships: Sequence[Dict[
     except Exception:
         db.rollback()
         raise
+
+
+def _resolve_membership_node(db: Session, node: Optional[DirectionNode], path: List[str]) -> DirectionNode:
+    """已有节点只是更粗的上级、而路径又向下延伸时，建子类而不是停在上级。"""
+    if node is not None and path:
+        current = normalize_path(node.path)
+        if path[:len(current)] == current and len(path) > len(current):
+            created = get_or_create_node(db, path, commit=False)
+            if created is not None:
+                return created
+        return node
+    if node is not None:
+        return node
+    if not path or any(part in (".", "..") for part in path):
+        raise ValueError("分类路径非法；旧分类未修改")
+    created = get_or_create_node(db, path, commit=False)
+    if created is None:
+        raise ValueError("分类路径非法；旧分类未修改")
+    return created
 
 
 def _recount_ids(db: Session, ids: Iterable[Optional[int]]) -> None:
@@ -316,10 +335,16 @@ def upsert_artifact(db: Session, paper_id: int, kind: str, content_md: str, *,
     if row is None:
         row = PaperArtifact(paper_id=paper_id, kind=kind)
         db.add(row)
-    elif row.content_md:
-        db.add(PaperArtifactVersion(paper_id=paper_id, kind=kind, content_md=row.content_md,
-                                   reasoning_md=row.reasoning_md, stats_json=row.stats_json,
-                                   model=row.model, created_at=row.updated_at))
+    else:
+        # 重跑覆盖当前结果，不保留上一版，这份产物上的追问也从空白开始。
+        (db.query(PaperArtifactVersion)
+         .filter(PaperArtifactVersion.paper_id == paper_id, PaperArtifactVersion.kind == kind)
+         .delete(synchronize_session=False))
+        scope = {ARTIFACT_SUMMARY: "summary", ARTIFACT_DEEP: "deep_reading"}.get(kind)
+        if scope:
+            sessions = db.query(ChatSession).filter_by(paper_id=paper_id, scope=scope).all()
+            for session in sessions:
+                db.delete(session)
     row.content_md = content_md or ""
     row.reasoning_md = reasoning_md or ""
     row.stats_json = json.dumps(stats or {}, ensure_ascii=False)
@@ -716,14 +741,12 @@ def refresh_nodes(db: Session, nodes: Sequence[DirectionNode], *,
         seen.add(node.id)
         sync_node_folders(db, node)
         exported.append(str(export_node_graph_md(db, node)))
-    # 模型分类只落位到"还没有归处"或"上一个方向镜像"里的论文：用户自己建过文件夹的绝不抢走
-    if move_paper is not None and (move_paper.folder_id is None
-                                   or (move_paper.folder and move_paper.folder.direction_node_id)):
-        target = move_paper_node or (nodes[0] if nodes else None)
-        if target is not None:
-            folder = sync_node_folders(db, target)
-            if move_paper.folder_id != folder.id:
-                move_paper_to_folder(db, move_paper, folder, source="auto")
+    # 这次分类明确指定了目标时，论文跟过去，包括它原来放在用户文件夹里的情况。
+    target = move_paper_node or (nodes[0] if nodes else None)
+    if move_paper is not None and target is not None:
+        folder = sync_node_folders(db, target)
+        if move_paper.folder_id != folder.id:
+            move_paper_to_folder(db, move_paper, folder, source="auto")
     return exported
 
 
@@ -869,6 +892,57 @@ def delete_node(db: Session, node: DirectionNode) -> int:
     """旧节点入口只解除方向定义，保留普通文件夹；子目录同步上移。"""
     folder = sync_node_folders(db, node)
     return delete_folder(db, folder, keep_folder=True)
+
+
+def _direction_subtree_empty(db: Session, node: DirectionNode) -> bool:
+    """这个方向和它的子方向都没有论文，并且下面没有用户自建文件夹。"""
+    ids = subtree_node_ids(db, node.id)
+    if db.query(PaperDirection).filter(PaperDirection.node_id.in_(ids)).count():
+        return False
+    folder = folder_of_node(db, node.id)
+    if folder is None:
+        return True
+    for fid in folder_subtree_ids(db, folder.id):
+        child = db.get(Folder, fid)
+        if child is not None and child.id != folder.id and not child.direction_node_id:
+            return False
+    return True
+
+
+def prune_empty_directions(db: Session) -> List[str]:
+    """删掉重新分类后已经没有任何论文的方向。仍有子类论文的上级保留。"""
+    removed: List[str] = []
+    while True:
+        target = None
+        for node in (db.query(DirectionNode)
+                     .order_by(DirectionNode.depth.desc(), DirectionNode.id.desc())
+                     .all()):
+            if _direction_subtree_empty(db, node):
+                target = node
+                break
+        if target is None:
+            break
+        path = target.path
+        parent_id = target.parent_id
+        folder = folder_of_node(db, target.id)
+        md = _node_md_path(target)
+        if md.is_file():
+            md.unlink()
+            try:
+                md.parent.rmdir()
+            except OSError:
+                pass
+        if folder is None:
+            db.query(PaperRelation).filter_by(node_id=target.id).delete(synchronize_session=False)
+            db.delete(target)
+            db.commit()
+        else:
+            delete_folder(db, folder, keep_folder=False)
+        removed.append(path)
+        parent = db.get(DirectionNode, parent_id) if parent_id else None
+        if parent is not None:
+            export_node_graph_md(db, parent)
+    return removed
 
 
 def repair_paper_folders(db: Session) -> int:
