@@ -22,6 +22,7 @@ SSE 帧统一为 `data: {json}\n\n`，json 内 type ∈ {delta, tool, error, can
 
 import json
 import logging
+import threading
 from typing import Any, Dict, Iterator, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -40,6 +41,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
+# 同一会话只允许一轮生成落库。编辑、重新生成或新提问会推进序号，
+# 被打断的那一轮即使还在收尾，也不能再把已经丢掉的回复写回来。
+_GEN_LOCK = threading.Lock()
+_GENERATION: Dict[int, int] = {}
+
+
+def _bump_generation(session_id: int) -> int:
+    with _GEN_LOCK:
+        generation = _GENERATION.get(session_id, 0) + 1
+        _GENERATION[session_id] = generation
+        return generation
+
+
+def _is_current(session_id: int, generation: int) -> bool:
+    with _GEN_LOCK:
+        return _GENERATION.get(session_id) == generation
+
 _SSE_HEADERS = {
     "Cache-Control": "no-cache",
     "X-Accel-Buffering": "no",
@@ -52,23 +70,29 @@ def _sse(payload: Dict[str, Any]) -> str:
     return encode_event(payload)
 
 
-def _save_assistant_message(session_id: int, full_text: str, reasoning: str = "", message_id=None):
+def _save_assistant_message(session_id: int, full_text: str, reasoning: str = "", message_id=None,
+                            generation: Optional[int] = None):
     """用独立会话保存助手回复（流式场景下不依赖请求级会话）。"""
     if not full_text and not reasoning:
         return None
+    if generation is not None and not _is_current(session_id, generation):
+        return None
     db = database.SessionLocal()
     try:
-        msg = db.get(ChatMessage, message_id) if message_id else None
-        if message_id and msg is None:
-            return None
-        if msg is None:
-            msg = ChatMessage(session_id=session_id, role="assistant", content=full_text)
-            db.add(msg)
-        msg.content = full_text
-        msg.reasoning_content = reasoning or ""
-        db.commit()
-        db.refresh(msg)
-        return msg.id
+        with _GEN_LOCK:
+            if generation is not None and _GENERATION.get(session_id) != generation:
+                return None
+            msg = db.get(ChatMessage, message_id) if message_id else None
+            if message_id and msg is None:
+                return None
+            if msg is None:
+                msg = ChatMessage(session_id=session_id, role="assistant", content=full_text)
+                db.add(msg)
+            msg.content = full_text
+            msg.reasoning_content = reasoning or ""
+            db.commit()
+            db.refresh(msg)
+            return msg.id
     except Exception as exc:  # noqa: BLE001
         logger.warning("保存助手回复失败：%s", exc)
         db.rollback()
@@ -80,7 +104,8 @@ def _save_assistant_message(session_id: int, full_text: str, reasoning: str = ""
 def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
                   messages: List[Dict[str, Any]], tools: List[Any],
                   max_rounds: int,
-                  should_stop: Optional[Any] = None) -> Iterator[str]:
+                  should_stop: Optional[Any] = None,
+                  generation: Optional[int] = None) -> Iterator[str]:
     """把 harness 的 agent 事件流翻译成 SSE 帧（正文与推理内容双通道）。
 
     用户点「终止」时（should_stop 命中）：把**已经生成的部分**落库并打上终止标记，
@@ -95,6 +120,8 @@ def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
                                      max_rounds=max_rounds, should_stop=should_stop)
     try:
         for event in events:
+            if generation is not None and not _is_current(session_id, generation):
+                return
             kind = event.get("type")
             if kind == "delta":
                 content = event.get("content", "") or ""
@@ -106,7 +133,7 @@ def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
                 if content or reasoning:
                     # 先持久化再发送：客户端断开不应让已经显示的片段丢失。
                     message_id = _save_assistant_message(session_id, "".join(collected) + interrupted_note,
-                                                         "".join(reasoning_collected), message_id)
+                                                         "".join(reasoning_collected), message_id, generation)
                     yield _sse({"type": "delta", "text": content, "reasoning": reasoning})
             elif kind == "tool":
                 yield _sse({"type": "tool", "name": event.get("name", ""),
@@ -118,7 +145,7 @@ def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
                 full = (event.get("full_content") or event.get("content") or "".join(collected)).strip()
                 reasoning_full = (event.get("full_reasoning_content")
                                   or "".join(reasoning_collected)).strip()
-                message_id = _save_assistant_message(session_id, full, reasoning_full, message_id)
+                message_id = _save_assistant_message(session_id, full, reasoning_full, message_id, generation)
                 complete = True
                 yield _sse({"type": "done", "message_id": message_id, "full_text": full,
                             "reasoning_chars": len(reasoning_full)})
@@ -127,7 +154,7 @@ def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
         partial = "".join(collected).strip()
         reasoning_partial = "".join(reasoning_collected).strip()
         message_id = _save_assistant_message(session_id, partial + interrupted_note if partial or reasoning_partial else "",
-                                             reasoning_partial, message_id)
+                                             reasoning_partial, message_id, generation)
         complete = True
         logger.info("对话被用户终止（session=%s，已生成 %d 字）", session_id, len(partial))
         yield _sse({"type": "cancelled", "message_id": message_id,
@@ -137,9 +164,9 @@ def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
         yield _sse({"type": "error", "message": str(exc)[:300]})
     finally:
         events.close()
-        if not complete and (collected or reasoning_collected):
+        if (generation is None or _is_current(session_id, generation)) and not complete and (collected or reasoning_collected):
             _save_assistant_message(session_id, "".join(collected).strip() + interrupted_note,
-                                    "".join(reasoning_collected).strip(), message_id)
+                                    "".join(reasoning_collected).strip(), message_id, generation)
 
 
 # ---------------- 会话管理 ----------------
@@ -180,51 +207,46 @@ def delete_session(session_id: int, db: Session = Depends(database.get_db)):
     return Response(status_code=204)
 
 
-# ---------------- 发送消息 + 流式回复 ----------------
-@router.post("/sessions/{session_id}/messages")
-def post_message(session_id: int, body: schemas.ChatRequest,
-                 db: Session = Depends(database.get_db)):
-    session = db.get(ChatSession, session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="会话不存在")
-    paper = session.paper
-    if paper is None:
-        raise HTTPException(status_code=404, detail="会话关联的论文不存在")
-    content = body.content.strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="消息不能为空")
+def _drop_after(db: Session, session_id: int, message_id: int) -> None:
+    """丢掉某一条用户提问之后的回复。当前轮次重新生成时，中断前已经写出的内容不保留。"""
+    (db.query(ChatMessage)
+     .filter(ChatMessage.session_id == session_id, ChatMessage.id > message_id)
+     .delete(synchronize_session=False))
 
-    # 保存用户消息；首条用户消息用作会话标题
-    prior_user = (db.query(ChatMessage)
-                  .filter(ChatMessage.session_id == session_id, ChatMessage.role == "user")
-                  .count())
-    db.add(ChatMessage(session_id=session_id, role="user", content=content))
-    if prior_user == 0:
-        session.title = content[:40]
-    db.commit()
-    db.refresh(session)
 
-    settings = settings_store.get_llm_settings(db)
-    if not harness_llm.is_configured(settings):
-        def _unconfigured() -> Iterator[str]:
-            yield _sse({"type": "error",
-                        "message": "尚未配置 LLM（base_url / model / api_key），请先在右上角设置中填写并保存。"})
-            yield _sse({"type": "done", "message_id": None, "full_text": ""})
-        return StreamingResponse(_unconfigured(), media_type="text/event-stream", headers=_SSE_HEADERS)
-
-    cfg = settings_store.get_harness_settings(db)
-    # 历史不含刚保存的这条（build_chat_messages 会把当前提问单独追加在末尾）
-    history = [{"role": m.role, "content": m.content} for m in session.messages[:-1]
-               if m.role in ("user", "assistant")]
-    messages, _info = harness_chat.build_chat_messages(paper, history, content, cfg=cfg)
-    tools = harness_chat.build_chat_tools(paper, cfg)
-
-    token = body.cancel_token
+def _stream_reply(session_id: int, user_message_id: int, token: Optional[str], generation: int):
+    """从一条已经落库的用户提问继续生成。历史只取这条之前的对话。"""
+    db = database.SessionLocal()
+    try:
+        session = db.get(ChatSession, session_id)
+        user_msg = db.get(ChatMessage, user_message_id)
+        if session is None or user_msg is None or session.paper is None:
+            def _missing() -> Iterator[str]:
+                yield _sse({"type": "error", "message": "会话不存在"})
+                yield _sse({"type": "done", "message_id": None, "full_text": ""})
+            return StreamingResponse(_missing(), media_type="text/event-stream", headers=_SSE_HEADERS)
+        paper = session.paper
+        content = user_msg.content
+        settings = settings_store.get_llm_settings(db)
+        if not harness_llm.is_configured(settings):
+            def _unconfigured() -> Iterator[str]:
+                yield _sse({"type": "error",
+                            "message": "尚未配置 LLM（base_url / model / api_key），请先在右上角设置中填写并保存。"})
+                yield _sse({"type": "done", "message_id": None, "full_text": ""})
+            return StreamingResponse(_unconfigured(), media_type="text/event-stream", headers=_SSE_HEADERS)
+        cfg = settings_store.get_harness_settings(db)
+        history = [{"role": m.role, "content": m.content}
+                   for m in session.messages
+                   if m.id < user_message_id and m.role in ("user", "assistant")]
+        messages, _info = harness_chat.build_chat_messages(paper, history, content, cfg=cfg)
+        tools = harness_chat.build_chat_tools(paper, cfg)
+        rounds = harness_chat.max_tool_rounds(cfg)
+    finally:
+        db.close()
 
     def stream() -> Iterator[str]:
-        frames = _event_stream(session_id, settings, messages, tools,
-                               harness_chat.max_tool_rounds(cfg),
-                               should_stop=cancel_registry.watcher(token))
+        frames = _event_stream(session_id, settings, messages, tools, rounds,
+                               should_stop=cancel_registry.watcher(token), generation=generation)
         try:
             yield from frames
         finally:
@@ -232,3 +254,78 @@ def post_message(session_id: int, body: schemas.ChatRequest,
             cancel_registry.release(token)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+# ---------------- 发送消息 + 流式回复 ----------------
+@router.post("/sessions/{session_id}/messages")
+def post_message(session_id: int, body: schemas.ChatRequest,
+                 db: Session = Depends(database.get_db)):
+    session = db.get(ChatSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    if session.paper is None:
+        raise HTTPException(status_code=404, detail="会话关联的论文不存在")
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="消息不能为空")
+
+    generation = _bump_generation(session_id)
+    # 保存用户消息；首条用户消息用作会话标题
+    prior_user = (db.query(ChatMessage)
+                  .filter(ChatMessage.session_id == session_id, ChatMessage.role == "user")
+                  .count())
+    user_msg = ChatMessage(session_id=session_id, role="user", content=content)
+    db.add(user_msg)
+    if prior_user == 0:
+        session.title = content[:40]
+    db.commit()
+    db.refresh(user_msg)
+    return _stream_reply(session_id, user_msg.id, body.cancel_token, generation)
+
+
+@router.post("/sessions/{session_id}/messages/{message_id}/edit")
+def edit_message(session_id: int, message_id: int, body: schemas.ChatRequest,
+                 db: Session = Depends(database.get_db)):
+    """改一条用户提问，丢掉它后面这一轮已经生成的内容，再按新内容重新回答。"""
+    session = db.get(ChatSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    message = db.get(ChatMessage, message_id)
+    if message is None or message.session_id != session_id:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    if message.role != "user":
+        raise HTTPException(status_code=400, detail="只能编辑自己发出的提问")
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="消息不能为空")
+
+    generation = _bump_generation(session_id)
+    _drop_after(db, session_id, message.id)
+    message.content = content
+    first_user = (db.query(ChatMessage)
+                  .filter(ChatMessage.session_id == session_id, ChatMessage.role == "user")
+                  .order_by(ChatMessage.id.asc())
+                  .first())
+    if first_user is not None and first_user.id == message.id:
+        session.title = content[:40]
+    db.commit()
+    return _stream_reply(session_id, message.id, body.cancel_token, generation)
+
+
+@router.post("/sessions/{session_id}/regenerate")
+def regenerate_message(session_id: int, body: schemas.RegenerateRequest,
+                       db: Session = Depends(database.get_db)):
+    """当前轮次重新生成：保留最后一条提问，丢掉它后面的回复。"""
+    session = db.get(ChatSession, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    last_user = (db.query(ChatMessage)
+                 .filter(ChatMessage.session_id == session_id, ChatMessage.role == "user")
+                 .order_by(ChatMessage.id.desc())
+                 .first())
+    if last_user is None:
+        raise HTTPException(status_code=400, detail="这页对话还没有可以重新生成的提问")
+    generation = _bump_generation(session_id)
+    _drop_after(db, session_id, last_user.id)
+    db.commit()
+    return _stream_reply(session_id, last_user.id, body.cancel_token, generation)

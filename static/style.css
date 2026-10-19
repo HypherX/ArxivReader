@@ -520,7 +520,7 @@ button.mini.primary:hover { color: #fff; filter: brightness(1.05); }
 .msg.user ::selection { background: rgba(255, 255, 255, .88); color: #241b52; }
 .msg {
   max-width: 88%; padding: 11px 14px; border-radius: 16px; line-height: 1.62;
-  white-space: pre-wrap; word-break: break-word;
+  white-space: normal; word-break: break-word;
   box-shadow: var(--shadow-xs);
   animation: msg-in .18s var(--ease);
 }
@@ -543,6 +543,16 @@ button.mini.primary:hover { color: #fff; filter: brightness(1.05); }
 }
 @keyframes blink { to { visibility: hidden; } }
 .msg .answer { display: block; }
+.msg-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; user-select: none; -webkit-user-select: none; }
+.msg-act {
+  border: 1px solid var(--border); background: var(--panel); color: var(--muted);
+  border-radius: 999px; font-size: 11px; padding: 2px 8px; cursor: pointer;
+}
+.msg-act:hover { color: var(--text); border-color: var(--accent); }
+.msg.user .msg-act { background: rgba(255, 255, 255, .16); border-color: rgba(255, 255, 255, .28); color: #fff; }
+.msg-edit { display: flex; flex-direction: column; gap: 8px; }
+.msg-edit textarea { width: 100%; min-height: 72px; resize: vertical; color: var(--text); background: #fff; }
+.msg.user .md, .msg.user .md a, .msg.user .md pre, .msg.user .md code { color: #fff; }
 
 /* 推理过程（reasoning_content）折叠块 */
 .reasoning {
@@ -680,6 +690,18 @@ button.mini.primary:hover { color: #fff; filter: brightness(1.05); }
 }
 .modal-foot .foot-hint { flex: 1; margin: 0; }
 .hint { font-size: 12px; color: var(--muted); margin: -6px 0 14px; line-height: 1.65; }
+.settings-module {
+  border: 1px solid var(--border); border-radius: 12px; margin: 0 0 12px; background: var(--panel-soft);
+}
+.settings-module > summary {
+  cursor: pointer; padding: 10px 12px; font-weight: 700; color: var(--text); list-style: none;
+}
+.settings-module > summary::-webkit-details-marker { display: none; }
+.settings-module > summary::before { content: "▸ "; color: var(--accent); }
+.settings-module[open] > summary::before { content: "▾ "; }
+.settings-module .module-body { padding: 0 12px 4px; }
+.settings-advanced { margin: 2px 0 12px; }
+.settings-advanced > summary { cursor: pointer; font-weight: 600; color: var(--text-soft); }
 .hint.ok { color: var(--ok); font-weight: 600; }
 .hint.err { color: var(--danger); font-weight: 600; }
 

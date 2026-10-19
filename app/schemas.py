@@ -105,6 +105,10 @@ class ChatRequest(BaseModel):
     cancel_token: Optional[str] = Field(None, description="用于「终止」按钮的取消令牌")
 
 
+class RegenerateRequest(BaseModel):
+    cancel_token: Optional[str] = Field(None, description="用于「终止」按钮的取消令牌")
+
+
 # ---------------- Settings ----------------
 class LLMSettingsOut(BaseModel):
     """采样参数为 None 表示"未设置，沿用服务端默认值"。"""
