@@ -70,6 +70,17 @@ engine = _make_engine()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
+def reopen_db() -> None:
+    """关闭连接池，并按当前资料目录重新打开 SQLite。
+
+    从云端恢复会换掉 library.db。sessionmaker 原地改绑定，已 import 的引用仍然有效。
+    """
+    global engine
+    engine.dispose()
+    engine = _make_engine()
+    SessionLocal.configure(bind=engine)
+
+
 def get_db() -> Generator[Session, None, None]:
     """FastAPI 依赖：每个请求一个会话，结束自动关闭。"""
     db = SessionLocal()

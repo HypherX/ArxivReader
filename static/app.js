@@ -2292,6 +2292,147 @@
     $("graph-reset").addEventListener("click", function () { graphZoom = 1; $("relation-paper").value = ""; $("relation-filter").value = ""; renderRelations(); });
   }
 
+  // ---------------- Google Drive 同步 ----------------
+  var syncView = null;
+  var syncSeen = 0;
+  var syncWatching = false;
+
+  function formatBytes(n) {
+    n = Number(n) || 0;
+    var units = ["B", "KB", "MB", "GB"];
+    var i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
+    var digits = i === 0 || n >= 10 ? 0 : 1;
+    return n.toFixed(digits) + " " + units[i];
+  }
+  function formatWhen(iso) {
+    if (!iso) return "";
+    var date = new Date(iso);
+    return isNaN(date.getTime()) ? iso : date.toLocaleString();
+  }
+  function renderSync(view, fill) {
+    syncView = view;
+    if (fill && document.activeElement !== $("sync-client-id")) $("sync-client-id").value = view.client_id || "";
+    I18n.bind($("sync-secret-hint"), function () { return view.has_client_secret ? I18n.t("sync.secret_saved") : ""; });
+    I18n.bind($("sync-account"), function () {
+      if (!view.connected) return I18n.t("sync.disconnected");
+      return view.email ? I18n.t("sync.account", { email: view.email }) : I18n.t("sync.account_unknown");
+    });
+    I18n.bind($("sync-local"), function () {
+      var local = view.local || {};
+      return I18n.t("sync.local_summary", { files: local.files || 0, size: formatBytes(local.bytes), papers: local.papers || 0 });
+    });
+    I18n.bind($("sync-cloud"), function () {
+      if (!view.cloud) return I18n.t("sync.cloud_empty");
+      return I18n.t("sync.cloud_summary", {
+        when: formatWhen(view.cloud.uploaded_at), device: view.cloud.device || "—",
+        files: view.cloud.files || 0, size: formatBytes(view.cloud.bytes),
+      });
+    });
+    var err = $("sync-cloud-error");
+    if (view.cloud_error && view.cloud_error.code) {
+      err.classList.remove("hidden");
+      I18n.bind(err, function () { return I18n.t(view.cloud_error.code, view.cloud_error.params); });
+    } else {
+      err.classList.add("hidden");
+      I18n.write(err, "");
+    }
+    var job = view.job;
+    var running = !!(job && job.running);
+    $("sync-progress").classList.toggle("hidden", !running);
+    if (running) {
+      var bar = $("sync-bar");
+      var pct = job.total ? Math.min(100, Math.round(job.done / job.total * 100)) : 0;
+      bar.style.width = pct + "%";
+      bar.classList.toggle("indeterminate", !job.total);
+      I18n.bind($("sync-progress-text"), function () {
+        var phase = I18n.t("sync.phase." + (job.phase || "scan"));
+        var count = job.total ? (" " + job.done + "/" + job.total) : "";
+        return phase + count + (job.current ? (" · " + job.current) : "");
+      });
+    }
+    $("sync-save").disabled = running;
+    $("sync-connect").disabled = running || !view.configured;
+    I18n.bind($("sync-connect"), function () { return view.connected ? I18n.t("sync.reconnect") : I18n.t("sync.connect"); });
+    $("sync-disconnect").classList.toggle("hidden", !view.connected);
+    $("sync-disconnect").disabled = running;
+    $("sync-push").disabled = running || !view.connected;
+    $("sync-pull").disabled = running || !view.connected;
+    $("sync-cancel").classList.toggle("hidden", !running);
+  }
+  function finishSyncJob(view) {
+    var job = view.job;
+    if (!job || !job.finished || job.id === syncSeen) return;
+    syncSeen = job.id;
+    if (job.ok && job.op === "pull") { location.reload(); return; }
+    if (job.ok && job.op === "push") toast(function () { return I18n.t("sync.uploaded"); }, "ok");
+    else if (job.ok && job.op === "connect") toast(function () { return I18n.t("sync.connected"); }, "ok");
+    else if (job.error) toast(function () { return I18n.t(job.error, job.error_params); }, "err", 8000);
+  }
+  function watchSync() {
+    if (syncWatching) return;
+    syncWatching = true;
+    (function tick() {
+      api.get("/api/sync").then(function (view) {
+        if (!$("sync-modal").classList.contains("hidden")) renderSync(view, false);
+        if (view.job && view.job.running) { setTimeout(tick, 800); return; }
+        syncWatching = false;
+        finishSyncJob(view);
+      }).catch(function () { syncWatching = false; });
+    })();
+  }
+  function openSync() {
+    api.get("/api/sync").then(function (view) {
+      if (view.job && view.job.finished) syncSeen = view.job.id;
+      $("sync-client-secret").value = "";
+      renderSync(view, true);
+      $("sync-modal").classList.remove("hidden");
+      if (view.job && view.job.running) { watchSync(); return; }
+      api.post("/api/sync/cloud").then(function (next) {
+        if (!$("sync-modal").classList.contains("hidden")) renderSync(next, false);
+      }).catch(function () {});
+    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
+  function saveSyncClient() {
+    var body = { client_id: $("sync-client-id").value.trim() };
+    var secret = $("sync-client-secret").value.trim();
+    if (secret) body.client_secret = secret;
+    api.put("/api/sync/client", body).then(function (view) {
+      $("sync-client-secret").value = "";
+      renderSync(view, true);
+      toast(function () { return I18n.t("sync.saved"); }, "ok");
+    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
+  function startSync(path, body) {
+    api.post(path, body).then(function (view) {
+      renderSync(view, false);
+      watchSync();
+    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
+  function pushSync() {
+    var run = function () { startSync("/api/sync/push"); };
+    if (syncView && syncView.cloud) {
+      askConfirm(function () { return I18n.t("sync.push_title"); }, [function () { return I18n.t("sync.push_line"); }],
+        { danger: true, okText: function () { return I18n.t("sync.push"); } }).then(function (ok) { if (ok) run(); });
+      return;
+    }
+    run();
+  }
+  function pullSync() {
+    var cloud = (syncView && syncView.cloud) || null;
+    var lines = cloud ? [function () {
+      return I18n.t("sync.pull_line1", {
+        when: formatWhen(cloud.uploaded_at), device: cloud.device || "—",
+        files: cloud.files || 0, size: formatBytes(cloud.bytes),
+      });
+    }] : [function () { return I18n.t("sync.pull_unknown"); }];
+    lines.push(function () { return I18n.t("sync.pull_line2"); });
+    askConfirm(function () { return I18n.t("sync.pull_title"); }, lines,
+      { danger: true, okText: function () { return I18n.t("sync.pull"); } }).then(function (ok) {
+      if (ok) startSync("/api/sync/pull", { confirm: true });
+    });
+  }
+
   // ---------------- 事件绑定 ----------------
   function bind() {
     bindReadingUpgrade();
@@ -2331,6 +2472,22 @@
       state.currentSessionId = parseInt($("session-select").value, 10) || null; loadMessages();
     });
 
+    $("open-sync").addEventListener("click", openSync);
+    $("sync-save").addEventListener("click", saveSyncClient);
+    $("sync-connect").addEventListener("click", function () { startSync("/api/sync/connect"); });
+    $("sync-disconnect").addEventListener("click", function () {
+      askConfirm(function () { return I18n.t("sync.disconnect_title"); },
+        [function () { return I18n.t("sync.disconnect_line"); }]).then(function (ok) {
+        if (ok) api.post("/api/sync/disconnect").then(renderSync).catch(function (e) { toast(function () { return e.message; }, "err"); });
+      });
+    });
+    $("sync-push").addEventListener("click", pushSync);
+    $("sync-pull").addEventListener("click", pullSync);
+    $("sync-cancel").addEventListener("click", function () {
+      api.post("/api/sync/cancel").then(function (view) { renderSync(view, false); }).catch(function (e) {
+        toast(function () { return e.message; }, "err");
+      });
+    });
     $("open-settings").addEventListener("click", openSettings);
     $("save-settings").addEventListener("click", function () { saveSettings(false); });
     $("test-llm").addEventListener("click", testLLM);
