@@ -2648,6 +2648,90 @@
     });
   }
 
+  // ---------------- Zotero 导入 ----------------
+  var zoteroWatching = false;
+  function renderZoteroJob(job) {
+    var box = $("zotero-progress");
+    if (!job || (!job.running && !job.finished)) { box.classList.add("hidden"); return; }
+    box.classList.remove("hidden");
+    var total = job.total || 0;
+    var done = Math.min(job.done || 0, total);
+    $("zotero-bar").style.width = total ? Math.round(done * 100 / total) + "%" : "0%";
+    var phaseKey = "zotero.phase_" + (job.phase || "copy");
+    $("zotero-progress-text").textContent = I18n.t(phaseKey) + " " + done + "/" + total +
+      (job.current ? " · " + job.current : "");
+    $("zotero-cancel").classList.toggle("hidden", !job.running);
+    $("zotero-import").disabled = !!job.running || !$("zotero-scan-result").dataset.ok;
+  }
+  function finishZoteroJob(job) {
+    if (!job || !job.finished) return;
+    renderZoteroJob(job);
+    if (job.ok) {
+      var r = job.result || {};
+      toast(function () {
+        return I18n.t("zotero.done", {
+          imported: r.imported || 0, skipped: r.skipped_existing || 0, failed: r.failed || 0,
+        });
+      }, "ok");
+      loadFolders();
+      loadPapers();
+    } else if (job.error) {
+      toast(function () { return I18n.t(job.error, job.result || {}); }, "err");
+    }
+  }
+  function watchZotero() {
+    if (zoteroWatching) return;
+    zoteroWatching = true;
+    (function tick() {
+      api.get("/api/zotero/job").then(function (d) {
+        var job = d && d.job;
+        if (!$("zotero-modal").classList.contains("hidden")) renderZoteroJob(job);
+        if (job && job.running) { setTimeout(tick, 800); return; }
+        zoteroWatching = false;
+        finishZoteroJob(job);
+      }).catch(function () { zoteroWatching = false; });
+    })();
+  }
+  function openZotero() {
+    api.get("/api/zotero/default-path").then(function (d) {
+      $("zotero-path").value = d.exists ? d.path : "";
+      $("zotero-modal").classList.remove("hidden");
+      return api.get("/api/zotero/job");
+    }).then(function (d) {
+      if (d && d.job && d.job.running) { renderZoteroJob(d.job); watchZotero(); }
+    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
+  function scanZotero() {
+    var btn = $("zotero-scan");
+    btn.disabled = true;
+    api.post("/api/zotero/scan", { path: zoteroPath() }).then(function (d) {
+      var s = d.stats || {};
+      var el = $("zotero-scan-result");
+      el.dataset.ok = "1";
+      el.classList.remove("hidden");
+      el.textContent = I18n.t("zotero.scan_result", {
+        with_pdf: s.with_pdf || 0, arxiv: s.arxiv || 0, collections: s.collections || 0,
+        already: s.already_in_library || 0, missing: s.missing_file || 0,
+      });
+      $("zotero-collections-row").classList.toggle("hidden", !(s.collections > 0));
+      $("zotero-import").disabled = !(s.with_pdf > 0);
+      if (!s.with_pdf) toast(function () { return I18n.t("zotero.no_papers"); }, "err");
+    }).catch(function (e) {
+      $("zotero-scan-result").dataset.ok = "";
+      toast(function () { return e.message; }, "err");
+    }).then(function () { btn.disabled = false; });
+  }
+  function zoteroPath() { return $("zotero-path").value.trim(); }
+  function startZoteroImport() {
+    api.post("/api/zotero/import", {
+      path: zoteroPath(),
+      use_collections: $("zotero-use-collections").checked,
+    }).then(function (job) {
+      renderZoteroJob(job);
+      watchZotero();
+    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
+
   // ---------------- 事件绑定 ----------------
   function bind() {
     bindReadingUpgrade();
@@ -2690,6 +2774,13 @@
     });
 
     $("open-sync").addEventListener("click", openSync);
+    $("zotero-btn").addEventListener("click", openZotero);
+    $("zotero-scan").addEventListener("click", scanZotero);
+    $("zotero-import").addEventListener("click", startZoteroImport);
+    $("zotero-cancel").addEventListener("click", function () {
+      api.post("/api/zotero/cancel").then(function (d) { renderZoteroJob(d.job); })
+        .catch(function (e) { toast(function () { return e.message; }, "err"); });
+    });
     $("sync-save").addEventListener("click", saveSyncClient);
     $("sync-save-webdav").addEventListener("click", saveSyncWebdav);
     $("sync-tab-google").addEventListener("click", function () { switchSyncTab("google", false); });

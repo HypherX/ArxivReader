@@ -618,7 +618,29 @@
     "follow.deep_placeholder": ["就这份精读继续问…（Enter 发送，Shift+Enter 换行）", "Ask about this deep reading… (Enter to send, Shift+Enter for a new line)"],
     "follow.summary_hint": ["可以在下面继续追问。这里只保留这份总结的问答，不会带上其他窗口。", "Ask follow-up questions below. This window only keeps the summary thread."],
     "follow.deep_hint": ["可以在下面继续追问。这里只保留这份精读的问答，不会带上其他窗口。", "Ask follow-up questions below. This window only keeps the deep-reading thread."],
-    "follow.need_artifact": ["先生成这一步的结果，再继续追问。", "Generate this result before asking a follow-up."]
+    "follow.need_artifact": ["先生成这一步的结果，再继续追问。", "Generate this result before asking a follow-up."],
+    "zotero.open": ["📥 Zotero 导入", "📥 Import Zotero"],
+    "zotero.open_title": ["把本机 Zotero 文库的论文导入到 ArxivReader", "Import papers from your local Zotero library"],
+    "zotero.title": ["从 Zotero 导入", "Import from Zotero"],
+    "zotero.intro": ["把本机 Zotero 文库里的论文（PDF、标题、作者、摘要）复制进 ArxivReader，Zotero 里的数据原样保留。已入库的论文会自动跳过，可以重复执行。", "Copy papers (PDF, title, authors, abstract) from your local Zotero library into ArxivReader. Your Zotero data stays untouched. Papers already in the library are skipped, so re-running is safe."],
+    "zotero.path": ["Zotero 数据目录", "Zotero data directory"],
+    "zotero.path_hint": ["默认读取 ~/Zotero；改过位置的话填你的数据目录（里面应有 zotero.sqlite 和 storage/）。导入前建议先关闭 Zotero，避免正在写入的数据不完整。", "Defaults to ~/Zotero; if you moved it, enter your data directory (it should contain zotero.sqlite and storage/). Quit Zotero before importing so no half-written data is picked up."],
+    "zotero.scan": ["扫描", "Scan"],
+    "zotero.scan_result": ["找到 {with_pdf} 篇可导入论文（其中 {arxiv} 篇识别出 arXiv 编号），{collections} 个收藏夹，{already} 篇已在库中，{missing} 篇缺少本机 PDF 文件。", "Found {with_pdf} papers with PDFs ({arxiv} with an arXiv ID), {collections} collections, {already} already in the library, {missing} missing their local PDF."],
+    "zotero.use_collections": ["按 Zotero 收藏夹建文件夹（多个收藏夹取最深的那个）", "Create folders from Zotero collections (deepest one wins for papers in several)"],
+    "zotero.import": ["开始导入", "Start import"],
+    "zotero.cancel": ["取消", "Cancel"],
+    "zotero.phase_scan": ["正在扫描 Zotero 库", "Scanning Zotero library"],
+    "zotero.phase_copy": ["正在复制 PDF", "Copying PDFs"],
+    "zotero.phase_extract": ["正在抽取全文", "Extracting text"],
+    "zotero.phase_done": ["导入完成", "Import finished"],
+    "zotero.done": ["导入完成：新增 {imported} 篇，跳过已有 {skipped} 篇，失败 {failed} 篇。", "Import finished: {imported} added, {skipped} already in library, {failed} failed."],
+    "zotero.not_found": ["没找到 Zotero 数据目录：里面应有 zotero.sqlite。请在 Zotero「偏好设置 → 高级 → 数据存储位置」里确认目录。", "Zotero data directory not found (it should contain zotero.sqlite). Check the location in Zotero under Preferences → Advanced → Data Storage."],
+    "zotero.invalid": ["这个目录不像 Zotero 数据目录（缺少必要的表）。", "This does not look like a Zotero data directory (required tables are missing)."],
+    "zotero.no_papers": ["Zotero 库里没有可导入的论文（没有找到本机 PDF 附件）。", "No importable papers found in the Zotero library (no local PDF attachments)."],
+    "zotero.running": ["已有导入任务在进行中", "An import is already running"],
+    "zotero.cancelled": ["导入已取消", "Import cancelled"],
+    "zotero.failed": ["导入中断：{message}", "Import interrupted: {message}"]
   };
   Object.keys(extra).forEach(function (key) { MESSAGES[key] = extra[key]; });
   var language = "zh", bindings = new Map(), channel;

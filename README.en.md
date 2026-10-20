@@ -52,6 +52,7 @@ The library and the PDF reader work without a model. Summaries, classification, 
 - 🔗 **arXiv**: paste a link or an id such as `2401.12345`. The PDF is downloaded and the text is extracted.
 - 📤 **Local PDF**: upload a file. The same file is recognised by its contents, so it is not added twice.
 - 🧲 **Related papers**: the app reads Related Work and the references, then judges relevance from abstracts. A paper you keep is added only to **All papers**. Summary and classification stay separate.
+- 📥 **Zotero import**: choose **📥 Import Zotero** in the top bar. The app reads your local Zotero data directory (by default `~/Zotero`, which contains `zotero.sqlite` and `storage/`). Papers that have a PDF are copied in with their title, authors, and abstract. Collections become folders at the same depth; a paper that sits in several collections goes into the deepest one. arXiv ids are recognised and used for deduplication; other PDFs are matched by content. Papers already in the library are skipped, so you can run the import again. Nothing in Zotero is moved or changed. Quit Zotero before importing.
 
 A new paper stays in **All papers** until you classify it or move it into a folder you created. Selecting a folder also shows the papers in its subfolders.
 
