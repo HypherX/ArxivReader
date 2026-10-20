@@ -32,6 +32,7 @@
 <button class="ghost" data-i18n="ui.a0ab5987d808" id="open-reviews">综述历史</button>
 
 
+<button class="ghost" data-i18n="zotero.open" data-i18n-title="zotero.open_title" id="zotero-btn" title="从本机 Zotero 文库导入论文">📥 Zotero 导入</button>
 <button class="ghost" data-i18n="sync.open" data-i18n-title="sync.open_title" id="open-sync">云同步</button>
 <button class="ghost" data-i18n="ui.df3d58c7d84b" id="open-settings">设置</button>
 </div>
@@ -448,6 +449,29 @@
 <div class="hint" id="review-progress"></div>
 <div class="reading-actions" id="review-actions"></div>
 <article class="md" id="review-content"></article>
+</div>
+</div>
+</div>
+<div class="modal hidden" id="zotero-modal">
+<div class="modal-card">
+<div class="modal-head"><span data-i18n="zotero.title">从 Zotero 导入</span><button class="mini" data-close="zotero-modal">✕</button></div>
+<div class="modal-body">
+<p class="hint" data-i18n="zotero.intro">把本机 Zotero 文库里的论文（PDF、标题、作者、摘要）复制进 ArxivReader，Zotero 里的数据原样保留。已入库的论文会自动跳过，可以重复执行。</p>
+<label><span data-i18n="zotero.path">Zotero 数据目录</span><input autocomplete="off" id="zotero-path" placeholder="~/Zotero" spellcheck="false" type="text"/></label>
+<div class="hint" data-i18n="zotero.path_hint" id="zotero-path-hint">默认读取 ~/Zotero；改过位置的话填你的数据目录（里面应有 zotero.sqlite 和 storage/）。导入前建议先关闭 Zotero，避免正在写入的数据不完整。</div>
+<div class="sync-actions">
+<button class="ghost" data-i18n="zotero.scan" id="zotero-scan" type="button">扫描</button>
+</div>
+<div class="hint hidden" id="zotero-scan-result"></div>
+<label class="hidden" id="zotero-collections-row"><input checked="checked" id="zotero-use-collections" type="checkbox"/><span data-i18n="zotero.use_collections">按 Zotero 收藏夹建文件夹（多个收藏夹取最深的那个）</span></label>
+<div class="hidden" id="zotero-progress">
+<div class="progress"><div class="progress-bar" id="zotero-bar"></div></div>
+<div class="hint" id="zotero-progress-text"></div>
+</div>
+</div>
+<div class="modal-foot">
+<button class="ghost hidden" data-i18n="zotero.cancel" id="zotero-cancel" type="button">取消</button>
+<button class="primary" data-i18n="zotero.import" disabled id="zotero-import" type="button">开始导入</button>
 </div>
 </div>
 </div>
