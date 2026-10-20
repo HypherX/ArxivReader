@@ -2318,9 +2318,36 @@
   }
   function togglePane(name) {
     var L = loadLayout();
-    L["hide_" + name] = !L["hide_" + name];
+    var hiding = !L["hide_" + name];
+    L["hide_" + name] = hiding;
+    var pe = paneEl(name);
+    var rzName = RESIZER_OF[name];
+    var rz = rzName ? $(rzName) : null;
+    var btn = document.querySelector('.layout-toggles .lt[data-pane="' + name + '"]');
+    if (btn) {                     // 按钮弹跳反馈
+      btn.classList.remove("just-toggled");
+      void btn.offsetWidth;
+      btn.classList.add("just-toggled");
+    }
+    if (hiding && pe && !pe.classList.contains("collapsed")) {
+      pe.classList.add("pane-leaving");          // 先淡出，再真正收起
+      if (rz) rz.classList.add("pane-leaving");
+      setTimeout(function () {
+        pe.classList.remove("pane-leaving");
+        if (rz) rz.classList.remove("pane-leaving");
+        saveLayout(L);
+        applyVisibility();
+      }, 160);
+      return;
+    }
     saveLayout(L);
     applyVisibility();
+    if (!hiding && pe) {                          // 重新显示时滑入
+      pe.classList.remove("pane-enter");
+      void pe.offsetWidth;
+      pe.classList.add("pane-enter");
+      setTimeout(function () { pe.classList.remove("pane-enter"); }, 280);
+    }
   }
   function startResize(e, rz) {
     var name = rz.getAttribute("data-for");
