@@ -30,6 +30,8 @@ def _utcnow() -> datetime.datetime:
 
 # 本地上传论文的 arxiv_id 前缀（真实 arxiv id 只含数字/斜杠/点，不会以该前缀开头）
 LOCAL_ID_PREFIX = "local-"
+# 从 Zotero 导入、且条目本身没有 arXiv 编号时使用。有 arXiv 编号的仍用规范 id，避免和手动入库重复。
+ZOTERO_ID_PREFIX = "zotero-"
 
 
 class Folder(Base):
@@ -122,8 +124,13 @@ class Paper(Base):
 
     @property
     def source(self) -> str:
-        """论文来源：arxiv | local（本地上传的 PDF 使用 local- 前缀 id）。"""
-        return "local" if (self.arxiv_id or "").startswith(LOCAL_ID_PREFIX) else "arxiv"
+        """论文来源：arxiv | local（本地上传）| zotero（无 arXiv 编号的 Zotero 条目）。"""
+        arxiv_id = self.arxiv_id or ""
+        if arxiv_id.startswith(LOCAL_ID_PREFIX):
+            return "local"
+        if arxiv_id.startswith(ZOTERO_ID_PREFIX):
+            return "zotero"
+        return "arxiv"
 
     @property
     def has_text(self) -> bool:

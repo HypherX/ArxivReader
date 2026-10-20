@@ -21,7 +21,7 @@ from harness import config
 from . import database
 from .routers import (cancel, chat, folders, knowledge, papers, pdftranslate, related,
                       reviews, settings as settings_router, skills, sync as sync_router,
-                      translations)
+                      translations, zotero as zotero_router)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("ArxivReader")
@@ -114,6 +114,7 @@ app.include_router(folders.router)
 app.include_router(papers.router)
 app.include_router(settings_router.router)
 app.include_router(sync_router.router)
+app.include_router(zotero_router.router)
 app.include_router(chat.router)
 app.include_router(skills.router)
 app.include_router(knowledge.router)

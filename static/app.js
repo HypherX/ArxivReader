@@ -2648,12 +2648,122 @@
     });
   }
 
+  // ---------------- 从 Zotero 导入 ----------------
+  var zoteroView = null;
+  var zoteroSeen = 0;
+  var zoteroWatching = false;
+
+  function renderZotero(view) {
+    zoteroView = view;
+    var job = view.job || {};
+    var running = !!job.running;
+    I18n.bind($("zotero-key-hint"), function () { return view.configured ? I18n.t("zotero.key_saved") : ""; });
+    I18n.bind($("zotero-account"), function () {
+      if (!view.configured) return I18n.t("zotero.disconnected");
+      return I18n.t("zotero.account", { username: view.username || "—", user_id: view.user_id || "—" });
+    });
+    $("zotero-progress").classList.toggle("hidden", !running);
+    if (running) {
+      var bar = $("zotero-bar");
+      var pct = job.total ? Math.min(100, Math.round(job.done / job.total * 100)) : 0;
+      bar.style.width = pct + "%";
+      bar.classList.toggle("indeterminate", !job.total);
+      I18n.bind($("zotero-progress-text"), function () {
+        var phase = I18n.t("zotero.phase." + (job.phase || "items"));
+        var count = job.total ? (" " + job.done + "/" + job.total) : "";
+        return phase + count;
+      });
+    }
+    var result = $("zotero-result");
+    if (!running && job.finished && job.ok) {
+      result.classList.remove("hidden", "err");
+      I18n.bind(result, function () {
+        return I18n.t("zotero.done", { imported: job.imported || 0, skipped: job.skipped || 0, failed: job.failed || 0 });
+      });
+    } else if (!running && job.finished && job.error) {
+      result.classList.remove("hidden");
+      result.classList.add("err");
+      I18n.bind(result, function () { return I18n.t(job.error, job.error_params || {}); });
+    } else {
+      result.classList.add("hidden");
+      result.classList.remove("err");
+    }
+    $("zotero-save").disabled = running;
+    $("zotero-sync").disabled = running || !view.configured;
+    $("zotero-forget").disabled = running || !view.configured;
+  }
+  function finishZotero(view) {
+    var job = view.job;
+    if (!job || !job.finished || job.id === zoteroSeen) return;
+    zoteroSeen = job.id;
+    if (job.ok) {
+      toast(function () {
+        return I18n.t("zotero.done", { imported: job.imported || 0, skipped: job.skipped || 0, failed: job.failed || 0 });
+      }, "ok");
+      loadFolders();
+      loadPapers();
+    } else if (job.error) toast(function () { return I18n.t(job.error, job.error_params || {}); }, "err", 8000);
+  }
+  function watchZotero() {
+    if (zoteroWatching) return;
+    zoteroWatching = true;
+    (function tick() {
+      api.get("/api/zotero").then(function (view) {
+        if (!$("zotero-modal").classList.contains("hidden")) renderZotero(view);
+        if (view.job && view.job.running) { setTimeout(tick, 800); return; }
+        zoteroWatching = false;
+        finishZotero(view);
+      }).catch(function () { zoteroWatching = false; });
+    })();
+  }
+  function openZotero() {
+    api.get("/api/zotero").then(function (view) {
+      if (view.job && view.job.finished) zoteroSeen = view.job.id;
+      $("zotero-key").value = "";
+      renderZotero(view);
+      $("zotero-modal").classList.remove("hidden");
+      if (view.job && view.job.running) watchZotero();
+    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
+  function saveZoteroKey() {
+    var key = $("zotero-key").value.trim();
+    if (!key) {
+      toast(function () { return I18n.t(zoteroView && zoteroView.configured ? "zotero.key_placeholder" : "zotero.invalid_key"); }, "err");
+      return;
+    }
+    api.put("/api/zotero/key", { api_key: key }).then(function (view) {
+      $("zotero-key").value = "";
+      renderZotero(view);
+      toast(function () { return I18n.t("zotero.saved"); }, "ok");
+    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
+
   // ---------------- 事件绑定 ----------------
   function bind() {
     bindReadingUpgrade();
     $("add-btn").addEventListener("click", addPaper);
     $("new-url").addEventListener("keyup", function (e) { if (e.key === "Enter") addPaper(); });
     $("upload-btn").addEventListener("click", function () { $("pdf-upload-input").click(); });
+    $("open-zotero").addEventListener("click", openZotero);
+    $("zotero-save").addEventListener("click", saveZoteroKey);
+    $("zotero-sync").addEventListener("click", function () {
+      api.post("/api/zotero/sync").then(function (view) {
+        renderZotero(view);
+        watchZotero();
+      }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+    });
+    $("zotero-forget").addEventListener("click", function () {
+      askConfirm(function () { return I18n.t("zotero.forget_title"); },
+        [function () { return I18n.t("zotero.forget_line"); }],
+        { danger: true, okText: function () { return I18n.t("zotero.forget"); } }).then(function (ok) {
+        if (!ok) return;
+        api.del("/api/zotero/key").then(function (view) {
+          $("zotero-key").value = "";
+          renderZotero(view);
+          toast(function () { return I18n.t("zotero.forgot"); }, "ok");
+        }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+      });
+    });
     $("pdf-upload-input").addEventListener("change", function (e) {
       var f = e.target.files && e.target.files[0];
       e.target.value = "";   // 允许连续选择同一文件（后端会对重复内容报 409）
