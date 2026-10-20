@@ -707,18 +707,50 @@ button.mini.primary:hover { color: #fff; filter: brightness(1.05); }
 
 /* ================= 顶栏布局切换 / 分隔条 / 折叠 ================= */
 .layout-toggles {
-  display: flex; gap: 2px; padding: 3px;
+  display: flex; align-items: center; gap: 3px; padding: 3px 6px 3px 9px;
   background: var(--panel-soft); border: 1px solid var(--border);
   border-radius: 999px; flex-shrink: 0;
 }
-.layout-toggles .lt {
-  padding: 3px 9px; font-size: 14px; line-height: 1.4; border: none;
-  background: transparent; box-shadow: none; border-radius: 999px;
-  opacity: .42; filter: grayscale(1);
-  transition: opacity .15s var(--ease), background .15s var(--ease), filter .15s var(--ease);
+.layout-toggles .lt-caption {
+  font-size: 11px; color: var(--muted); letter-spacing: .05em;
+  margin-right: 2px; user-select: none;
 }
-.layout-toggles .lt:hover { background: #e8ebf3; transform: none; }
-.layout-toggles .lt.active { opacity: 1; filter: none; background: #fff; box-shadow: var(--shadow-xs); }
+.layout-toggles .lt {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; font-size: 12px; line-height: 1.5; border: none;
+  background: transparent; box-shadow: none; border-radius: 999px;
+  color: var(--muted); cursor: pointer;
+  transition: background .18s var(--ease), color .18s var(--ease), box-shadow .18s var(--ease), transform .12s var(--ease);
+}
+.layout-toggles .lt .lt-ico {
+  font-size: 13px; filter: grayscale(1); opacity: .45;
+  transition: filter .18s var(--ease), opacity .18s var(--ease), transform .18s var(--ease);
+}
+.layout-toggles .lt .lt-label {
+  text-decoration: line-through;                     /* 关 = 删除线，一眼看出该栏已隐藏 */
+  text-decoration-color: rgba(120, 130, 154, .75); text-decoration-thickness: 1px;
+  transition: color .18s var(--ease);
+}
+.layout-toggles .lt:hover { background: #e8ebf3; transform: none; color: var(--text-soft); }
+.layout-toggles .lt:active { transform: scale(.93); }
+.layout-toggles .lt.active {
+  background: #fff; box-shadow: var(--shadow-xs);
+  color: var(--text); font-weight: 500;
+}
+.layout-toggles .lt.active .lt-ico { filter: none; opacity: 1; }
+.layout-toggles .lt.active .lt-label { text-decoration: none; }
+@keyframes lt-pop { 0% { transform: scale(.86); } 55% { transform: scale(1.07); } 100% { transform: scale(1); } }
+.layout-toggles .lt.just-toggled { animation: lt-pop .26s var(--ease); }
+
+/* 面板显隐过渡：隐藏时淡出，显示时滑入（JS 负责节奏） */
+@keyframes pane-enter { from { opacity: 0; transform: translateY(6px) scale(.985); } to { opacity: 1; transform: none; } }
+.pane.pane-enter { animation: pane-enter .24s var(--ease); }
+.pane.pane-leaving, .resizer.pane-leaving {
+  opacity: 0; transform: scale(.985);
+  transition: opacity .16s var(--ease), transform .16s var(--ease);
+  pointer-events: none;
+}
+.pane { transition: opacity .16s var(--ease), transform .16s var(--ease); }
 
 .resizer { flex-shrink: 0; width: 6px; cursor: col-resize; position: relative; background: transparent; z-index: 5; }
 .resizer::after {
