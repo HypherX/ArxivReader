@@ -51,7 +51,8 @@ The library and the PDF reader work without a model. Summaries, classification, 
 
 - 🔗 **arXiv**: paste a link or an id such as `2401.12345`. The PDF is downloaded and the text is extracted.
 - 📤 **Local PDF**: upload a file. The same file is recognised by its contents, so it is not added twice.
-- 📚 **Zotero**: use **Zotero** in the top bar to import items, collections, and stored PDFs from your personal library. See below.
+- 📥 **Zotero import**: choose **📥 Import Zotero** in the top bar. The app reads your local Zotero data directory (by default `~/Zotero`, which contains `zotero.sqlite` and `storage/`). Papers that have a PDF are copied in with their title, authors, and abstract. Collections become folders at the same depth; a paper that sits in several collections goes into the deepest one. arXiv ids are recognised and used for deduplication; other PDFs are matched by content. Papers already in the library are skipped, so you can run the import again. Nothing in Zotero is moved or changed. Quit Zotero before importing.
+- 🔄 **Zotero sync**: **Zotero sync** in the top bar pulls items, collections, and stored PDFs with an API key. See below.
 - 🧲 **Related papers**: the app reads Related Work and the references, then judges relevance from abstracts. A paper you keep is added only to **All papers**. Summary and classification stay separate.
 
 A new paper stays in **All papers** until you classify it or move it into a folder you created. Selecting a folder also shows the papers in its subfolders.
@@ -120,12 +121,12 @@ Nutstore:
 
 Unchanged files are skipped. A restore keeps a copy of the current local data, and a failed check does not replace it. The cloud copy does not include API keys or sync passwords. Only HTTPS addresses are accepted, aside from loopback addresses used for local testing.
 
-## 📚 Import from Zotero
+## 🔄 Sync a Zotero library
 
-**Zotero** in the top bar copies a personal library into ArxivReader, so you do not have to save each PDF by hand. The import is read-only and does not change anything in Zotero.
+The local-directory import is for a Zotero install on this computer. On another computer, or when the library lives on zotero.org, use **Zotero sync** in the top bar. The sync is read-only and does not change anything in Zotero.
 
 1. Create a key at [Zotero key settings](https://www.zotero.org/settings/keys/new). Give it read-only access to your personal library, and allow it to read files.
-2. In ArxivReader, open **Zotero**, paste the key, and save it. The key is stored at `sync/zotero.json` inside the data directory (`data/sync/zotero.json` when you run from source). It is not written into the library database and is not part of the cloud backup.
+2. In ArxivReader, open **Zotero sync**, paste the key, and save it. The key is stored at `sync/zotero.json` inside the data directory (`data/sync/zotero.json` when you run from source). It is not written into the library database and is not part of the cloud backup.
 3. Choose **Sync now**. Zotero collections become subfolders under a **Zotero** folder. A paper that sits in several collections is filed in the first one.
 
 An arXiv paper or Zotero item that is already in the library is skipped, so local titles and notes stay as they are. The next sync only fetches items that are new or have changed. A PDF stored in Zotero is copied from there. If there is no stored PDF but the item has an arXiv id, the PDF is downloaded from arXiv. Group libraries, notes, and web snapshots are not imported.

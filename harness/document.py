@@ -476,6 +476,17 @@ class PaperDocument:
             text = _prefix(text, cap_tokens - tokens.estimate_tokens(note)) + note
         return text, tokens.estimate_tokens(text)
 
+    def stats(self) -> Dict[str, int]:
+        """给技能账本用的文档规模。深度精读在模型返回后会读取它。"""
+        pages = [block.page for block in self.blocks if block.page]
+        return {
+            "chars": len(self.raw_text or ""),
+            "blocks": len(self.blocks),
+            "pages": max(pages) if pages else 0,
+            "sections": len(self.sections),
+            "dropped_lines": len(self.dropped_lines),
+        }
+
     def render_complete(self, language: str = "zh") -> RenderedContext:
         """按原文顺序渲染全部章节，包含附录，不按预算丢弃后部内容。"""
         parts: List[str] = []

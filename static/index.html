@@ -19,7 +19,6 @@
 <select data-i18n-title="ui.c3c7f4b7e01a" id="target-folder" title="选一个文件夹；不选就只在「全部论文」里"></select>
 <button class="primary" data-i18n="ui.7a8a11ead507" id="add-btn">添加</button>
 <button class="ghost" data-i18n="ui.1c7f3a9bd2e4" data-i18n-title="ui.6e2b8d4fa903" id="upload-btn" title="上传本地 PDF 文件入库">📤 上传 PDF</button>
-<button class="ghost" data-i18n="zotero.open" data-i18n-title="zotero.open_title" id="open-zotero" title="从 Zotero 个人文库导入论文、分类和 PDF" type="button">Zotero</button>
 <input accept=".pdf,application/pdf" hidden id="pdf-upload-input" type="file"/>
 </div>
 <div class="layout-toggles" data-i18n-title="ui.45e25f083f33" title="显示 / 隐藏各面板">
@@ -33,6 +32,8 @@
 <button class="ghost" data-i18n="ui.a0ab5987d808" id="open-reviews">综述历史</button>
 
 
+<button class="ghost" data-i18n="zotero.open" data-i18n-title="zotero.open_title" id="zotero-btn" title="从本机 Zotero 文库导入论文">📥 Zotero 导入</button>
+<button class="ghost" data-i18n="zsync.open" data-i18n-title="zsync.open_title" id="zsync-open" title="用 API Key 同步 Zotero 个人文库" type="button">Zotero 同步</button>
 <button class="ghost" data-i18n="sync.open" data-i18n-title="sync.open_title" id="open-sync">云同步</button>
 <button class="ghost" data-i18n="ui.df3d58c7d84b" id="open-settings">设置</button>
 </div>
@@ -452,6 +453,29 @@
 </div>
 </div>
 </div>
+<div class="modal hidden" id="zotero-modal">
+<div class="modal-card">
+<div class="modal-head"><span data-i18n="zotero.title">从 Zotero 导入</span><button class="mini" data-close="zotero-modal">✕</button></div>
+<div class="modal-body">
+<p class="hint" data-i18n="zotero.intro">把本机 Zotero 文库里的论文（PDF、标题、作者、摘要）复制进 ArxivReader，Zotero 里的数据原样保留。已入库的论文会自动跳过，可以重复执行。</p>
+<label><span data-i18n="zotero.path">Zotero 数据目录</span><input autocomplete="off" id="zotero-path" placeholder="~/Zotero" spellcheck="false" type="text"/></label>
+<div class="hint" data-i18n="zotero.path_hint" id="zotero-path-hint">默认读取 ~/Zotero；改过位置的话填你的数据目录（里面应有 zotero.sqlite 和 storage/）。导入前建议先关闭 Zotero，避免正在写入的数据不完整。</div>
+<div class="sync-actions">
+<button class="ghost" data-i18n="zotero.scan" id="zotero-scan" type="button">扫描</button>
+</div>
+<div class="hint hidden" id="zotero-scan-result"></div>
+<label class="hidden" id="zotero-collections-row"><input checked="checked" id="zotero-use-collections" type="checkbox"/><span data-i18n="zotero.use_collections">按 Zotero 收藏夹建文件夹（多个收藏夹取最深的那个）</span></label>
+<div class="hidden" id="zotero-progress">
+<div class="progress"><div class="progress-bar" id="zotero-bar"></div></div>
+<div class="hint" id="zotero-progress-text"></div>
+</div>
+</div>
+<div class="modal-foot">
+<button class="ghost hidden" data-i18n="zotero.cancel" id="zotero-cancel" type="button">取消</button>
+<button class="primary" data-i18n="zotero.import" disabled id="zotero-import" type="button">开始导入</button>
+</div>
+</div>
+</div>
 <div class="modal hidden" id="sync-modal">
 <div class="modal-card sync-card">
 <div class="modal-head"><span data-i18n="sync.title">云同步</span><button class="mini" data-close="sync-modal">✕</button></div>
@@ -512,27 +536,27 @@
 </div>
 </div>
 </div>
-<div class="modal hidden" id="zotero-modal">
+<div class="modal hidden" id="zsync-modal">
 <div class="modal-card sync-card">
-<div class="modal-head"><span data-i18n="zotero.title">从 Zotero 导入</span><button class="mini" data-close="zotero-modal">✕</button></div>
+<div class="modal-head"><span data-i18n="zsync.title">同步 Zotero 文库</span><button class="mini" data-close="zsync-modal">✕</button></div>
 <div class="modal-body">
-<p class="hint" data-i18n="zotero.intro">把 Zotero 个人文库里的条目、分类和已保存的 PDF 导入到这里。在 zotero.org/settings/keys 新建一个密钥：个人文库选只读，并允许读取文件。之后再同步只拉新增和改过的条目，不会改你的 Zotero，也不会覆盖这边已经入库的论文。</p>
-<label><span data-i18n="zotero.api_key">API Key</span><input autocomplete="off" data-i18n-placeholder="zotero.key_placeholder" id="zotero-key" placeholder="留空表示不修改已保存的密钥" spellcheck="false" type="password"/></label>
-<div class="hint" id="zotero-key-hint"></div>
+<p class="hint" data-i18n="zsync.intro">把 Zotero 个人文库里的条目、分类和已保存的 PDF 导入到这里。在 zotero.org/settings/keys 新建一个密钥：个人文库选只读，并允许读取文件。之后再同步只拉新增和改过的条目，不会改你的 Zotero，也不会覆盖这边已经入库的论文。</p>
+<label><span data-i18n="zsync.api_key">API Key</span><input autocomplete="off" data-i18n-placeholder="zsync.key_placeholder" id="zsync-key" placeholder="留空表示不修改已保存的密钥" spellcheck="false" type="password"/></label>
+<div class="hint" id="zsync-key-hint"></div>
 <div class="sync-actions">
-<button class="ghost" data-i18n="zotero.save" id="zotero-save" type="button">保存密钥</button>
+<button class="ghost" data-i18n="zsync.save" id="zsync-save" type="button">保存密钥</button>
 </div>
-<div class="hint" id="zotero-account"></div>
-<div class="hint hidden" id="zotero-result"></div>
-<div class="hidden" id="zotero-progress">
-<div class="progress"><div class="progress-bar" id="zotero-bar"></div></div>
-<div class="hint" id="zotero-progress-text"></div>
+<div class="hint" id="zsync-account"></div>
+<div class="hint hidden" id="zsync-result"></div>
+<div class="hidden" id="zsync-progress">
+<div class="progress"><div class="progress-bar" id="zsync-bar"></div></div>
+<div class="hint" id="zsync-progress-text"></div>
 </div>
 </div>
 <div class="modal-foot">
-<button class="ghost" data-i18n="zotero.forget" id="zotero-forget" type="button">清除密钥</button>
+<button class="ghost" data-i18n="zsync.forget" id="zsync-forget" type="button">清除密钥</button>
 <span class="spacer"></span>
-<button class="primary" data-i18n="zotero.sync" id="zotero-sync" type="button">开始同步</button>
+<button class="primary" data-i18n="zsync.sync" id="zsync-run" type="button">开始同步</button>
 </div>
 </div>
 </div>

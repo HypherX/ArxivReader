@@ -141,9 +141,9 @@ def _job_update(**fields):
 
 
 class ZoteroClient:
-    """Zotero Web API v3。transport 只给测试替换，正常走 HTTPS。"""
+    """Zotero Web API v3。"""
 
-    def __init__(self, api_key, user_id="", transport=None, page_size=100):
+    def __init__(self, api_key, user_id="", page_size=100):
         self.api_key = api_key
         self.user_id = str(user_id or "")
         self.page_size = max(1, min(100, int(page_size)))
@@ -156,7 +156,6 @@ class ZoteroClient:
             },
             timeout=httpx.Timeout(30.0, read=120.0),
             follow_redirects=True,
-            transport=transport,
         )
 
     def close(self):
@@ -320,16 +319,16 @@ class ZoteroClient:
         return version, rows
 
 
-def verify_key(api_key, transport=None):
+def verify_key(api_key):
     _check_key_format(api_key)
-    with ZoteroClient(api_key.strip(), transport=transport) as client:
+    with ZoteroClient(api_key.strip()) as client:
         return client.identity()
 
 
-def save_key(api_key, transport=None):
+def save_key(api_key):
     _ensure_idle()
     _check_key_format(api_key)
-    identity = verify_key(api_key, transport=transport)
+    identity = verify_key(api_key)
     _save_creds({
         "api_key": api_key.strip(),
         "user_id": identity["user_id"],
