@@ -2692,7 +2692,17 @@
       }).catch(function () { zoteroWatching = false; });
     })();
   }
+  function switchZoteroTab(name) {
+    var local = name !== "online";
+    $("zotero-tab-local").classList.toggle("active", local);
+    $("zotero-tab-online").classList.toggle("active", !local);
+    $("zotero-pane-local").classList.toggle("hidden", !local);
+    $("zotero-pane-online").classList.toggle("hidden", local);
+    $("zotero-foot-local").classList.toggle("hidden", !local);
+    $("zotero-foot-online").classList.toggle("hidden", local);
+  }
   function openZotero() {
+    switchZoteroTab("local");
     api.get("/api/zotero/default-path").then(function (d) {
       $("zotero-path").value = d.exists ? d.path : "";
       $("zotero-modal").classList.remove("hidden");
@@ -2700,6 +2710,12 @@
     }).then(function (d) {
       if (d && d.job && d.job.running) { renderZoteroJob(d.job); watchZotero(); }
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+    api.get("/api/zotero").then(function (view) {       // 在线同步页签的状态一起带出来
+      if (view.job && view.job.finished) zsyncSeen = view.job.id;
+      $("zsync-key").value = "";
+      renderZsync(view);
+      if (view.job && view.job.running) watchZsync();
+    }).catch(function () {});
   }
   function scanZotero() {
     var btn = $("zotero-scan");
@@ -2793,21 +2809,12 @@
     zsyncWatching = true;
     (function tick() {
       api.get("/api/zotero").then(function (view) {
-        if (!$("zsync-modal").classList.contains("hidden")) renderZsync(view);
+        if (!$("zotero-modal").classList.contains("hidden")) renderZsync(view);
         if (view.job && view.job.running) { setTimeout(tick, 800); return; }
         zsyncWatching = false;
         finishZsync(view);
       }).catch(function () { zsyncWatching = false; });
     })();
-  }
-  function openZsync() {
-    api.get("/api/zotero").then(function (view) {
-      if (view.job && view.job.finished) zsyncSeen = view.job.id;
-      $("zsync-key").value = "";
-      renderZsync(view);
-      $("zsync-modal").classList.remove("hidden");
-      if (view.job && view.job.running) watchZsync();
-    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
   function saveZsyncKey() {
     var key = $("zsync-key").value.trim();
@@ -2865,13 +2872,14 @@
 
     $("open-sync").addEventListener("click", openSync);
     $("zotero-btn").addEventListener("click", openZotero);
+    $("zotero-tab-local").addEventListener("click", function () { switchZoteroTab("local"); });
+    $("zotero-tab-online").addEventListener("click", function () { switchZoteroTab("online"); });
     $("zotero-scan").addEventListener("click", scanZotero);
     $("zotero-import").addEventListener("click", startZoteroImport);
     $("zotero-cancel").addEventListener("click", function () {
       api.post("/api/zotero/cancel").then(function (d) { renderZoteroJob(d.job); })
         .catch(function (e) { toast(function () { return e.message; }, "err"); });
     });
-    $("zsync-open").addEventListener("click", openZsync);
     $("zsync-save").addEventListener("click", saveZsyncKey);
     $("zsync-run").addEventListener("click", function () {
       api.post("/api/zotero/sync").then(function (view) {
