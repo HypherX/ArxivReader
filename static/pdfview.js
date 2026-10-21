@@ -21,10 +21,10 @@
   var MIN_SCALE = 0.3, MAX_SCALE = 8;
   var RENDER_MARGIN = 900;          // 视口上下各预渲染多少像素
   var SIDE_PAD = 8;                 // 适应宽度时左右各留的空白：只留一条缝，页面基本铺满栏宽
-  var MAX_CANVAS_PIXELS = 2600000;      // 单页画布像素预算：超了首屏要等好几秒，还容易整片留白
+  var MAX_CANVAS_PIXELS = 16777216;  // 单页画布像素上限。放大时优先保住屏幕像素，极端倍率才降采样
+  var MAX_CANVAS_DIM = 8192;          // 单边像素上限：再大时部分浏览器会画失败，页面下半截留黑
   var MAX_CONCURRENT = 2;             // 同时渲染的页数
   var RENDER_TIMEOUT_MS = 12000;      // 单页渲染看门狗：超时归还额度并重排
-  var DPR = Math.max(1, Math.min(global.devicePixelRatio || 1, 2));
 
   var queue = [];                     // 待渲染页队列
   var rendering = 0;                  // 正在渲染的页数
@@ -247,15 +247,23 @@
     }
   }
 
+  /** 位图像素 / CSS 像素。放大后仍按 devicePixelRatio 画，字才不会被拉糊。 */
+  function outputRatio(viewport) {
+    var ratio = Math.max(1, Math.min(global.devicePixelRatio || 1, 2));
+    var pixels = viewport.width * viewport.height;
+    if (pixels > 0 && pixels * ratio * ratio > MAX_CANVAS_PIXELS) {
+      ratio = Math.sqrt(MAX_CANVAS_PIXELS / pixels);
+    }
+    var longest = Math.max(viewport.width, viewport.height);
+    if (longest > 0 && longest * ratio > MAX_CANVAS_DIM) ratio = MAX_CANVAS_DIM / longest;
+    return ratio > 0 ? ratio : 1;
+  }
+
   function startRender(record, done) {
     record.rendered = true;
     record.tries = (record.tries || 0) + 1;
     var viewport = record.page.getViewport({ scale: state.scale, rotation: state.rotation });
-    // 画布像素预算：高倍缩放时不再死守 devicePixelRatio，否则一页上千万像素，
-    // 首屏要空好几秒——这正是"页面下方一大片黑"的成因。
-    var ratio = DPR;
-    var pixels = viewport.width * viewport.height;
-    if (pixels * ratio * ratio > MAX_CANVAS_PIXELS) ratio = Math.max(1, Math.sqrt(MAX_CANVAS_PIXELS / pixels));
+    var ratio = outputRatio(viewport);
     var canvas = node("canvas", { class: "pv-canvas" });
     canvas.style.width = viewport.width + "px";
     canvas.style.height = viewport.height + "px";

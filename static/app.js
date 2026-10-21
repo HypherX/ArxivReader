@@ -1202,7 +1202,15 @@
       : (artifactView === "deep_reading" ? "follow.deep_placeholder" : "ui.dd716d62eec9");
     I18n.bind($("chat-input"), function () { return I18n.t(key); }, "placeholder");
   }
-  function loadFollowThread(kind) {
+  function threadScroller(box) {
+    if (box && box.id === "follow-messages") return $("av-scroll") || box;
+    return box;
+  }
+  function stickThreadBottom(box) {
+    var scroller = threadScroller(box);
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  }
+  function loadFollowThread(kind, stickBottom) {
     var paper = state.currentPaper;
     if (!paper || (kind !== "summary" && kind !== "deep_reading")) return Promise.resolve();
     var request = artifactRequest;
@@ -1218,6 +1226,7 @@
         if (loadId !== state.followLoad || request !== artifactRequest || artifactView !== kind || state.streaming) return;
         if (document.querySelector("#follow-messages .msg-edit")) return;
         renderMessages(messages, $("follow-messages"), true);
+        if (stickBottom) stickThreadBottom($("follow-messages"));
       });
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
@@ -1269,7 +1278,8 @@
         var block = makeReasoningBlock(body);
         renderReasoning(block, data.reasoning_md, false);
       }
-      body.scrollTop = 0;
+      var scroller = $("av-scroll");
+      if (scroller) scroller.scrollTop = 0;
     }).catch(function (e) {
       if (!current()) return;
       artifactText = "";
@@ -1836,7 +1846,6 @@
     var visible = state.messages.filter(function (m) { return m.role !== "system"; });
     if (!visible.length) {
       if (follow) {
-        box.classList.remove("has-msgs");
         box.appendChild(el("div", { class: "follow-hint", text: function () {
           return I18n.t(artifactView === "deep_reading" ? "follow.deep_hint" : "follow.summary_hint");
         } }));
@@ -1846,7 +1855,6 @@
       }
       return;
     }
-    if (follow) box.classList.add("has-msgs");
     var lastId = visible[visible.length - 1].id;
     visible.forEach(function (m) {
       var node = el("div", { class: "msg " + m.role });
@@ -1860,7 +1868,7 @@
       node.appendChild(messageActions(m, m.id === lastId));
       box.appendChild(node);
     });
-    box.scrollTop = box.scrollHeight;
+    if (!follow) box.scrollTop = box.scrollHeight;
   }
   function copyMessage(text) {
     Desktop.copy(String(text || "")).then(function () {
@@ -1932,11 +1940,12 @@
   function beginAssistantStream(url, payload) {
     var followKind = isFollowView() ? artifactView : "";
     var box = followKind ? $("follow-messages") : $("messages");
+    var scroller = threadScroller(box);
     var ai = el("div", { class: "msg assistant pending" });
     var answer = el("div", { class: "msg-body answer" });
     ai.appendChild(answer);
     box.appendChild(ai);
-    box.scrollTop = box.scrollHeight;
+    stickThreadBottom(box);
     var raw = "", rawReasoning = "", reasonBlock = null;
     state.streaming = true;
     setSendButton(true);
@@ -1947,7 +1956,7 @@
       if (aborted) toast(function () { return I18n.t("ui.459a568188e8"); }, "warn", 5000);
       if (followKind) {
         if (document.querySelector("#follow-messages .msg-edit")) return;
-        if (artifactView === followKind) loadFollowThread(followKind);
+        if (artifactView === followKind) loadFollowThread(followKind, true);
         return;
       }
       if (document.querySelector("#messages .msg-edit")) return;
@@ -1957,14 +1966,14 @@
     streamSSE(url, payload, {
       kind: "chat",
       onDelta: function (delta, reasoning) {
-        var nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 90;
+        var nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 90;
         if (reasoning) {
           if (!reasonBlock) { reasonBlock = makeReasoningBlock(ai); reasonBlock.wrap.open = true; }
           rawReasoning += reasoning;
           renderReasoning(reasonBlock, rawReasoning, true);
         }
         if (delta) { raw += delta; setMd(answer, raw, true); }
-        if (nearBottom) requestAnimationFrame(function () { box.scrollTop = box.scrollHeight; });
+        if (nearBottom) requestAnimationFrame(function () { scroller.scrollTop = scroller.scrollHeight; });
       },
       onDone: function () { finish(false); },
       onCancelled: function () { finish(true); },
@@ -1975,7 +1984,7 @@
         setSendButton(false);
         toast(function () { return I18n.t("ui.cfa7c64f924a") + I18n.value(errMsg); }, "err");
         if (followKind) {
-          if (artifactView === followKind && !document.querySelector("#follow-messages .msg-edit")) loadFollowThread(followKind);
+          if (artifactView === followKind && !document.querySelector("#follow-messages .msg-edit")) loadFollowThread(followKind, true);
           return;
         }
         if (document.querySelector("#messages .msg-edit")) return;
@@ -2006,7 +2015,6 @@
       input.value = "";
       var box = followKind ? $("follow-messages") : $("messages");
       if (box.querySelector(".empty") || box.querySelector(".follow-hint")) replaceChildren(box);
-      if (followKind) box.classList.add("has-msgs");
       var userNode = el("div", { class: "msg user" });
       var userBody = el("div", { class: "msg-body" });
       setMd(userBody, content);

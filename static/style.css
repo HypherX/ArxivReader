@@ -1091,13 +1091,13 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .av-ops { flex: 1 1 100%; display: flex; justify-content: flex-end; gap: 6px; }
-.av-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 16px 20px; font-size: 13px; color: var(--text-soft); }
+.av-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.av-body { padding: 6px 16px 8px; font-size: 13px; color: var(--text-soft); }
 #follow-messages {
-  flex: none; max-height: 42%; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
-  padding: 10px 14px 12px; border-top: 1px solid var(--border); background: var(--panel-soft);
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 4px 16px 28px;
 }
-#follow-messages.has-msgs { flex: 1 1 38%; min-height: 128px; }
-#follow-messages .follow-hint { color: var(--muted); font-size: 12px; line-height: 1.55; }
+#follow-messages .follow-hint { color: var(--muted); font-size: 12px; line-height: 1.55; padding-top: 8px; }
 #chat-pane.follow-mode .chat-head-actions { display: none; }
 .av-body .empty.rich { margin: auto; }
 .av-body .av-run { margin-top: 6px; }
