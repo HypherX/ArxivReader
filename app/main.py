@@ -19,9 +19,10 @@ from fastapi.staticfiles import StaticFiles
 
 from harness import config
 from . import database
+from .version import VERSION
 from .routers import (cancel, chat, folders, knowledge, papers, pdftranslate, related,
                       reviews, settings as settings_router, skills, sync as sync_router,
-                      translations, zotero)
+                      translations, update as update_router, zotero)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("ArxivReader")
@@ -90,7 +91,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="ArxivReader", version="1.1.1", lifespan=lifespan,
+app = FastAPI(title="ArxivReader", version=VERSION, lifespan=lifespan,
               docs_url=None if desktop_session.session else "/docs",
               redoc_url=None if desktop_session.session else "/redoc",
               openapi_url=None if desktop_session.session else "/openapi.json")
@@ -122,6 +123,7 @@ app.include_router(reviews.router)
 app.include_router(translations.router)
 app.include_router(pdftranslate.router)
 app.include_router(zotero.router)
+app.include_router(update_router.router)
 
 
 @app.get("/api/health", tags=["meta"])

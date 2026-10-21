@@ -702,7 +702,32 @@
     "zsync.phase.collections": ["正在读取分类", "Reading collections"],
     "zsync.phase.items": ["正在导入论文", "Importing papers"],
     "zsync.phase.done": ["同步完成", "Sync finished"],
-    "zsync.done": ["同步完成：新增 {imported} 篇，跳过 {skipped} 篇，失败 {failed} 篇", "Sync finished: {imported} added, {skipped} skipped, {failed} failed"]
+    "zsync.done": ["同步完成：新增 {imported} 篇，跳过 {skipped} 篇，失败 {failed} 篇", "Sync finished: {imported} added, {skipped} skipped, {failed} failed"],
+    "update.section": ["应用更新", "App updates"],
+    "update.auto": ["启动时自动检查更新", "Check for updates at launch"],
+    "update.check_now": ["检查更新", "Check now"],
+    "update.current": ["当前版本 v{version}", "Current version v{version}"],
+    "update.latest_is": ["，最新 v{version}", ", latest v{version}"],
+    "update.found": ["发现新版本 v{version}（当前 v{current}）", "New version v{version} available (current v{current})"],
+    "update.up_to_date": ["已是最新版本（v{version}）", "You're on the latest version (v{version})"],
+    "update.check_failed": ["检查更新失败，请检查网络后重试", "Update check failed; check your network and try again"],
+    "update.notes": ["查看说明", "Release notes"],
+    "update.now": ["立即更新", "Update now"],
+    "update.later": ["稍后", "Later"],
+    "update.later_title": ["此版本不再提醒", "Don't remind me about this version"],
+    "update.downloading": ["正在下载 v{version}…", "Downloading v{version}…"],
+    "update.downloaded_mb": ["{done} / {total} MB", "{done} / {total} MB"],
+    "update.done_title": ["下载完成", "Download finished"],
+    "update.done_line": ["v{version} 已下载并通过校验。重启应用后会自动完成更新并重新打开。", "v{version} downloaded and verified. The update finishes automatically after the app restarts."],
+    "update.restart_now": ["重启并更新", "Restart and update"],
+    "update.restarting": ["正在重启以完成更新…", "Restarting to finish updating…"],
+    "update.no_asset": ["没有找到适合你系统的安装包，请打开发布页手动下载", "No installer for your system; open the release page to download manually"],
+    "update.manual_only": ["当前系统暂不支持自动换包，请打开发布页手动下载", "Auto-update isn't supported on this system; download manually from the release page"],
+    "update.dev_mode": ["开发模式下不执行换包，请用 git 更新代码", "Dev mode: update the code with git instead"],
+    "update.bad_sha256": ["下载的安装包校验失败，请重试", "Downloaded package failed verification; try again"],
+    "update.download_failed": ["下载失败，请检查网络后重试", "Download failed; check your network and try again"],
+    "update.not_downloaded": ["还没有完成下载", "No finished download yet"],
+    "update.no_bundle": ["没有识别到应用包位置，请手动更新", "App bundle not recognized; update manually"]
   };
   Object.keys(extra).forEach(function (key) { MESSAGES[key] = extra[key]; });
   var language = "zh", bindings = new Map(), channel;

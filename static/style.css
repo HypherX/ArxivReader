@@ -1289,3 +1289,23 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
 @media (max-width: 640px) {
   .sync-stats { grid-template-columns: 1fr; }
 }
+
+/* ================= 应用更新横幅 ================= */
+.update-banner {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 16px; font-size: 12.5px;
+  background: linear-gradient(90deg, var(--accent-soft), #fff 65%);
+  border-bottom: 1px solid var(--accent-soft-2, var(--border));
+}
+.update-banner.hidden { display: none; }
+.ub-ico { color: var(--accent); font-weight: 700; }
+.ub-text { color: var(--text); font-weight: 600; }
+.ub-progress { display: flex; align-items: center; gap: 8px; min-width: 180px; }
+.ub-progress.hidden { display: none; }
+.ub-bar { width: 160px; height: 6px; border-radius: 999px; background: #e3e9f5; overflow: hidden; }
+.ub-fill { display: block; height: 100%; width: 0; border-radius: 999px; background: var(--accent); transition: width .3s ease; }
+.ub-pct { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.ub-link { color: var(--accent-hover); text-decoration: none; font-weight: 600; }
+.ub-link.hidden { display: none; }
+.ub-link:hover { text-decoration: underline; }
+.update-banner button { flex: none; }
