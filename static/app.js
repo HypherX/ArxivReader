@@ -1141,6 +1141,7 @@
   var artifactView = "chat";        // chat | summary | deep_reading
   var artifactText = "";            // 当前展示的 Markdown 原文（供复制/新窗口）
   var artifactPaperId = null, artifactsReadyFor = null, artifactVersion = null, artifactRequest = 0;
+  var chatEpoch = 0;          // 换论文就加一，晚到的会话响应不能再写回界面
 
   function setArtifactTabs(meta) {
     meta = meta || {};
@@ -1217,16 +1218,18 @@
     var loadId = (state.followLoad || 0) + 1;
     state.followLoad = loadId;
     return api.get("/api/papers/" + paper.id + "/sessions?scope=" + kind).then(function (list) {
-      if (loadId !== state.followLoad || request !== artifactRequest || artifactView !== kind || state.streaming) return;
+      if (loadId !== state.followLoad || request !== artifactRequest || artifactView !== kind) return;
       if (!state.currentPaper || state.currentPaper.id !== paper.id) return;
       var session = (list || [])[0];
       state.followSessions[kind] = session ? session.id : null;
       if (!session) { renderMessages([], $("follow-messages"), true); return; }
       return api.get("/api/sessions/" + session.id + "/messages").then(function (messages) {
-        if (loadId !== state.followLoad || request !== artifactRequest || artifactView !== kind || state.streaming) return;
+        if (loadId !== state.followLoad || request !== artifactRequest || artifactView !== kind) return;
         if (document.querySelector("#follow-messages .msg-edit")) return;
         renderMessages(messages, $("follow-messages"), true);
-        if (stickBottom) stickThreadBottom($("follow-messages"));
+        var live = chatLive[session.id];
+        if (live && live.followKind === kind) live.ensure();
+        else if (stickBottom) stickThreadBottom($("follow-messages"));
       });
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
@@ -1239,6 +1242,9 @@
     $("messages").classList.remove("hidden");
     setArtifactTabs(state.artifacts || {});
     syncComposer();
+    syncStreaming();
+    var live = state.currentSessionId && chatLive[state.currentSessionId];
+    if (live && !live.followKind) live.ensure();
   }
 
   function openArtifact(kind, version) {
@@ -1253,6 +1259,7 @@
     $("messages").classList.add("hidden");
     $("artifact-view").classList.remove("hidden");
     syncComposer();
+    syncStreaming();
     loadFollowThread(kind);
     setArtifactTabs(state.artifacts || {});
     document.querySelector('.art-tab[data-view="' + kind + '"]').classList.remove("attn");
@@ -1323,9 +1330,40 @@
     var en = { summary: "Quick summary", tree: "Classification", deep: "Deep reading", graph: "Relationships" };
     return PIPELINE_STEPS.map(function (s) { return { name: s.name, get title() { return lang(s.title, en[s.name]); } }; });
   }
-  var pipelineRunning = false;
-  var pipelinePaperId = null;
+  var pipelineJobs = {};          // paperId -> 后台阅读任务。换论文不取消，只是先不画在眼前
+  var PIPELINE_CARD_MS = 10000;
   var pipelineSteps = null;      // 步骤名与标题由后端 /api/knowledge/steps 提供（本地列表仅兜底）
+
+  function armPipelineHide(paperId) {
+    var job = pipelineJobs[paperId];
+    if (!job || job.status !== "done" || job.dismissed) return;
+    clearTimeout(job.hideTimer);
+    var left = PIPELINE_CARD_MS - (Date.now() - (job.finishedAt || Date.now()));
+    job.hideTimer = setTimeout(function () {
+      job.dismissed = true;
+      if (state.currentPaper && state.currentPaper.id === paperId) $("pipeline-panel").classList.add("hidden");
+    }, left > 0 ? left : 0);
+  }
+
+  function syncPipelinePanel() {
+    var panel = $("pipeline-panel");
+    var paper = state.currentPaper;
+    if (!paper) { panel.classList.add("hidden"); return; }
+    var job = pipelineJobs[paper.id];
+    if (!job || job.dismissed) { panel.classList.add("hidden"); return; }
+    if (job.status === "done" && job.finishedAt && Date.now() - job.finishedAt >= PIPELINE_CARD_MS) {
+      job.dismissed = true;
+      panel.classList.add("hidden");
+      return;
+    }
+    renderPipelinePanel(job.paper || paper, job.running ? "running" : (job.status || ""), job.steps, job.subtitle);
+    Object.keys(job.events || {}).forEach(function (name) {
+      var ev = job.events[name];
+      updatePipelineStep(ev.step, ev.status, ev.detail, ev);
+    });
+    if (!job.running && job.status) setPipelineState(job.status);
+    if (job.status === "done") armPipelineHide(paper.id);
+  }
 
   function loadPipelineSteps() {
     if (pipelineSteps) return Promise.resolve(pipelineSteps);
@@ -1355,7 +1393,13 @@
             text: function () { return I18n.t("ui.4808d729a1c3"); }, onclick: function () { stopPipeline(); } })
         : null,
       el("button", { class: "mini pp-close", title: function () { return I18n.t("ui.90bb34c2f1de"); }, text: "✕",
-        onclick: function () { if (!pipelineRunning) $("pipeline-panel").classList.add("hidden"); } }),
+        onclick: function () {
+          var id = state.currentPaper && state.currentPaper.id;
+          var job = id && pipelineJobs[id];
+          if (job && job.running) return;
+          if (job) { job.dismissed = true; clearTimeout(job.hideTimer); }
+          $("pipeline-panel").classList.add("hidden");
+        } }),
     ]));
     var list = el("div", { class: "pp-steps" });
     (steps || fallbackPipelineSteps()).forEach(function (s) {
@@ -1378,11 +1422,16 @@
     if (stop) stop.remove();      // 已结束/已终止时不再提供终止按钮
   }
 
-  /** 终止当前知识网络：先告诉服务端，再把前端连接断开（见 stopActiveStream） */
+  /** 终止眼前这篇的阅读任务。别的论文上还在跑的任务不动。 */
   function stopPipeline() {
-    if (!pipelineRunning) return;
-    if (!stopActiveStream()) return;
-    pipelineRunning = false;
+    var paper = state.currentPaper;
+    if (!paper) return;
+    var job = pipelineJobs[paper.id];
+    if (!job || !job.running) return;
+    job.running = false;
+    job.status = "cancelled";
+    var stream = findStream(function (s) { return s.kind === "pipeline" && s.paperId === paper.id; });
+    if (stream) stopStream(stream);
     setPipelineState("cancelled");
     var panel = $("pipeline-panel");
     var runningRow = panel.querySelector(".pp-step.running");
@@ -1485,8 +1534,14 @@
     });
   }
 
+  function pipelineOnScreen(paperId) {
+    return !!(state.currentPaper && state.currentPaper.id === paperId
+      && pipelineJobs[paperId] && !pipelineJobs[paperId].dismissed);
+  }
+
   function runPaperPipeline(paper, force, onlySteps) {
-    if (pipelineRunning) { toast(function () { return I18n.t("ui.2c5d0ca1517f"); }, "warn"); return; }
+    var existing = pipelineJobs[paper.id];
+    if (existing && existing.running) { toast(function () { return I18n.t("ui.2c5d0ca1517f"); }, "warn"); return; }
     var allSteps = pipelineSteps || fallbackPipelineSteps();
     var subset = (onlySteps && onlySteps.length)
       ? allSteps.filter(function (s) { return onlySteps.indexOf(s.name) >= 0; })
@@ -1494,52 +1549,72 @@
     var lastStep = onlySteps && onlySteps.length ? onlySteps[onlySteps.length - 1] : null;
     var subtitle = (lastStep && ARTIFACT_META[STEP_TO_ARTIFACT[lastStep]])
       ? I18n.t("ui.5714758766c8") + ARTIFACT_META[STEP_TO_ARTIFACT[lastStep]].title : "";
-    pipelineRunning = true;
-    pipelinePaperId = paper.id;
-    renderPipelinePanel(paper, "running", subset, subtitle);
+    if (existing) clearTimeout(existing.hideTimer);
+    var job = pipelineJobs[paper.id] = {
+      paper: paper, running: true, status: "running", subtitle: subtitle, steps: subset,
+      events: {}, finishedAt: 0, dismissed: false, hideTimer: null,
+    };
+    if (state.currentPaper && state.currentPaper.id === paper.id) renderPipelinePanel(paper, "running", subset, subtitle);
     var refresh = function () {
       loadFolders(); loadPapers();
       if (currentGraphNodeId) loadNodeGraph(currentGraphNodeId);
-      if (state.currentPaper && state.currentPaper.id === pipelinePaperId) updateCtxStatus(state.currentPaper);
+      if (state.currentPaper && state.currentPaper.id === paper.id) updateCtxStatus(state.currentPaper);
     };
+    function taskName() {
+      var kind = lastStep && STEP_TO_ARTIFACT[lastStep];
+      return (kind && ARTIFACT_META[kind]) ? ARTIFACT_META[kind].title : I18n.t("ui.bgTaskName");
+    }
     streamSSE("/api/papers/" + paper.id + "/knowledge/run?stream=true",
               { steps: (onlySteps && onlySteps.length) ? onlySteps : null, force: !!force }, {
       kind: "pipeline",
-      onAborted: function () {
-        // 用户点了「终止」：状态与步骤文案已由 stopPipeline 就地更新
-        pipelineRunning = false;
-      },
+      paperId: paper.id,
+      onAborted: function () { job.running = false; },
       onDelta: function () { /* 本通道不发 delta */ },
-      onStep: function (ev) { updatePipelineStep(ev.step, ev.status, ev.detail, ev); },
+      onStep: function (ev) {
+        job.events[ev.step] = ev;
+        if (pipelineOnScreen(paper.id)) updatePipelineStep(ev.step, ev.status, ev.detail, ev);
+      },
       onError: function (msg) {
-        pipelineRunning = false;
-        setPipelineState("failed");
+        job.running = false;
+        job.status = "failed";
+        if (pipelineOnScreen(paper.id)) setPipelineState("failed");
         toast(function () { return I18n.t("ui.6c9df36adf8c") + I18n.value(msg); }, "err", 8000);
       },
       onDone: function (payload) {
-        pipelineRunning = false;
+        job.running = false;
         var records = (payload && payload.steps) || [];
         var ok = (payload && payload.status) === "done";
         var cancelled = (payload && (payload.status === "cancelled" || payload.cancelled));
         var done = records.filter(function (s) { return s.status === "done"; }).length;
+        var here = pipelineOnScreen(paper.id);
         if (cancelled) {
-          pipelineRunning = false;
-          setPipelineState("cancelled");
-          var panel = $("pipeline-panel");
-          panel.querySelectorAll(".pp-step.todo").forEach(function (row) {
-            row.className = "pp-step skipped";
-            I18n.write(row.querySelector(".pp-dot"), "–");
-            I18n.bind(row.querySelector(".pp-detail"), function () { return I18n.t("ui.71e03cd890f4"); });
-          });
+          job.status = "cancelled";
+          if (here) {
+            setPipelineState("cancelled");
+            var panel = $("pipeline-panel");
+            panel.querySelectorAll(".pp-step.todo").forEach(function (row) {
+              row.className = "pp-step skipped";
+              I18n.write(row.querySelector(".pp-dot"), "–");
+              I18n.bind(row.querySelector(".pp-detail"), function () { return I18n.t("ui.71e03cd890f4"); });
+            });
+          }
           toast(function () { return I18n.t("ui.53ba45fb3fef") + done; }, "warn", 6000);
           refresh();
-          loadPaperArtifacts(paper);
+          if (here) loadPaperArtifacts(paper);
           return;
         }
-        setPipelineState(ok ? "done" : "failed");
+        job.status = ok ? "done" : "failed";
+        if (ok) job.finishedAt = Date.now();
+        if (here) setPipelineState(job.status);
         refresh();
-        if (onlySteps && onlySteps.length === 1 && onlySteps[0] === "graph" && ok
-            && state.currentPaper && state.currentPaper.id === paper.id) {
+        if (ok) armPipelineHide(paper.id);
+        if (!here) {
+          if (ok) toast(function () {
+            return I18n.t("ui.bgTaskDone", { title: shortText(paper.title || paper.arxiv_id, 24), task: taskName() });
+          }, "ok", 5000);
+          return;
+        }
+        if (onlySteps && onlySteps.length === 1 && onlySteps[0] === "graph" && ok) {
           showPaperGraph(state.currentPaper);   // 关系步的结果是一张图，跑完就地打开
         }
         // 产物刷新后直接打开，避免“跑完了但找不到输出”
@@ -1649,8 +1724,22 @@
   }
   function selectPaper(p) {
     if (!state.currentPaper || state.currentPaper.id !== p.id) {
-      stopActiveStream(); state.currentSessionId = null; state.sessions = []; state.followSessions = {};
-      artifactRequest++; artifactText = "";
+      // 只换眼前这一页。对话和阅读任务留在后台继续跑，回来再接上。
+      chatEpoch++;
+      state.currentSessionId = null;
+      state.sessions = [];
+      state.followSessions = {};
+      artifactRequest++;
+      artifactText = "";
+      fillSessionSelect([]);
+      renderMessages([]);
+      if ($("follow-messages")) renderMessages([], $("follow-messages"), true);
+      // 阅读页上的正文也先清掉，避免上一篇的总结还停在眼前
+      if (artifactView !== "chat") {
+        var staleBody = $("av-body");
+        if (staleBody) replaceChildren(staleBody, skeleton("rows", 3));
+        if ($("av-meta")) I18n.write($("av-meta"), "");
+      }
     }
     hideNodeGraph();
     state.currentPaper = p; renderPapers();
@@ -1660,6 +1749,8 @@
     I18n.write($("viewer-title"), p.title || p.arxiv_id);
     I18n.write($("chat-title"), p.title || p.arxiv_id);
     updateCtxStatus(p);
+    syncPipelinePanel();
+    syncStreaming();
     loadSessions();
     // 阅读产物页签：换论文就重新拉一次，已生成的直接可看
     loadPaperArtifacts(p).then(function (meta) {
@@ -1669,11 +1760,21 @@
     });
   }
 
-  // 上下文状态：明确告知用户“全文/仅摘要/已截断”，避免默默降级
+  // 上下文状态：打开论文时说一声全文进没进上下文，停 10 秒再收起，免得一直占着对话栏。
+  var ctxHideTimer = null;
+  var ctxShownFor = null;
   function updateCtxStatus(p) {
     var box = $("ctx-status");
-    if (!p) { box.className = "ctx-status hidden"; I18n.write(box, ""); return; }
-    box.classList.remove("hidden");
+    if (!p) {
+      clearTimeout(ctxHideTimer);
+      ctxShownFor = null;
+      box.className = "ctx-status hidden";
+      I18n.write(box, "");
+      return;
+    }
+    if (ctxShownFor === p.id) return;
+    ctxShownFor = p.id;
+    clearTimeout(ctxHideTimer);
     replaceChildren(box);
     if (p.has_text) {
       box.className = "ctx-status ok";
@@ -1683,6 +1784,9 @@
       box.className = "ctx-status warn";
       box.appendChild(el("span", { text: function () { return I18n.t("ui.962d7c4ad434"); } }));
     }
+    ctxHideTimer = setTimeout(function () {
+      if (ctxShownFor === p.id) box.classList.add("hidden");
+    }, PIPELINE_CARD_MS);
   }
 
   // ---------------- 添加论文 ----------------
@@ -1761,6 +1865,7 @@
     });
   }
   function clearCurrentPaper() {
+    chatEpoch++;
     state.currentPaper = null; state.sessions = []; state.currentSessionId = null; state.followSessions = {};
     state.artifacts = {}; state.knowledge = { memberships: [], edges: [] };
     hideReader();
@@ -1768,29 +1873,46 @@
     $("viewer-empty").classList.remove("hidden");
     $("viewer-toolbar").classList.add("hidden");
     I18n.bind($("chat-title"), function () { return I18n.t("ui.e63a45a5fc1e"); });
-    replaceChildren($("session-select"));
+    fillSessionSelect([]);
     $("pipeline-panel").classList.add("hidden");
     showChatView();
     updateCtxStatus(null);
     renderMessages([]);
+    syncStreaming();
   }
 
   // ---------------- 对话 ----------------
+  function fillSessionSelect(list) {
+    var sel = $("session-select");
+    sel.innerHTML = "";
+    if (!list || !list.length) {
+      // 没有会话时也要有一项，否则下拉框是空白
+      sel.appendChild(el("option", { value: "", text: function () { return I18n.t("chat.fresh"); } }));
+      sel.selectedIndex = 0;
+      sel.value = "";
+      return;
+    }
+    list.forEach(function (s) {
+      sel.appendChild(el("option", { value: String(s.id), text: function () { return s.title || I18n.t("chat.fresh"); } }));
+    });
+  }
   function loadSessions(preserveMessages) {
     var p = state.currentPaper; if (!p) return Promise.resolve();
+    var epoch = chatEpoch;
     return api.get("/api/papers/" + p.id + "/sessions").then(function (list) {
-      if (!state.currentPaper || state.currentPaper.id !== p.id) return;
-      state.sessions = list;
-      var sel = $("session-select"); sel.innerHTML = "";
-      list.forEach(function (s) { sel.appendChild(el("option", { value: String(s.id), text: function () { return s.title || (I18n.t("ui.64d26a4dd05e") + s.id); } })); });
-      var selected = list.find(function (s) { return s.id === state.currentSessionId; }) || list[0];
+      if (epoch !== chatEpoch || !state.currentPaper || state.currentPaper.id !== p.id) return;
+      state.sessions = list || [];
+      fillSessionSelect(state.sessions);
+      var selected = state.sessions.find(function (s) { return s.id === state.currentSessionId; }) || state.sessions[0];
       if (selected) {
-        state.currentSessionId = selected.id; sel.value = String(selected.id);
+        state.currentSessionId = selected.id;
+        $("session-select").value = String(selected.id);
       } else {
         state.currentSessionId = null;
+        $("session-select").value = "";
         if (!preserveMessages) renderMessages([]);
       }
-      setSendButton(!!state.streaming);
+      syncStreaming();
       if (selected && !preserveMessages) return loadChatMessages();
     }).catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
@@ -1823,11 +1945,15 @@
   function loadChatMessages() {
     if (!state.currentSessionId) { renderMessages([]); return; }
     var sid = state.currentSessionId;
+    var epoch = chatEpoch;
+    var paperId = state.currentPaper && state.currentPaper.id;
     return api.get("/api/sessions/" + sid + "/messages")
       .then(function (messages) {
-        if (state.currentSessionId !== sid || state.streaming) return;
+        if (epoch !== chatEpoch || state.currentSessionId !== sid) return;
         if (document.querySelector("#messages .msg-edit")) return;
         renderMessages(messages);
+        var live = chatLive[sid];
+        if (live && live.paperId === paperId && !live.followKind) live.ensure();
       })
       .catch(function (e) { toast(function () { return e.message; }, "err"); });
   }
@@ -1937,22 +2063,45 @@
     renderMessages(state.messages, isFollowView() ? $("follow-messages") : null, isFollowView());
     beginAssistantStream("/api/sessions/" + activeSessionId() + "/regenerate", {});
   }
-  function beginAssistantStream(url, payload) {
-    var followKind = isFollowView() ? artifactView : "";
-    var box = followKind ? $("follow-messages") : $("messages");
-    var scroller = threadScroller(box);
-    var ai = el("div", { class: "msg assistant pending" });
-    var answer = el("div", { class: "msg-body answer" });
-    ai.appendChild(answer);
-    box.appendChild(ai);
-    stickThreadBottom(box);
-    var raw = "", rawReasoning = "", reasonBlock = null;
-    state.streaming = true;
-    setSendButton(true);
-    var finish = function (aborted) {
-      ai.classList.remove("pending");
-      state.streaming = false;
-      setSendButton(false);
+  function chatStreamVisible(paperId, sessionId, followKind) {
+    if (!state.currentPaper || state.currentPaper.id !== paperId || !sessionId) return false;
+    if (followKind) return artifactView === followKind && state.followSessions[followKind] === sessionId;
+    return artifactView === "chat" && state.currentSessionId === sessionId;
+  }
+  function beginAssistantStream(url, payload, ctx) {
+    ctx = ctx || {};
+    var paperId = ctx.paperId || (state.currentPaper && state.currentPaper.id);
+    var followKind = ctx.followKind != null ? ctx.followKind : (isFollowView() ? artifactView : "");
+    var sessionId = ctx.sessionId || activeSessionId();
+    var ui = { ai: null, answer: null, reasonBlock: null, raw: "", rawReasoning: "" };
+    function visible() { return chatStreamVisible(paperId, sessionId, followKind); }
+    function ensure() {
+      if (!visible()) return false;
+      var box = followKind ? $("follow-messages") : $("messages");
+      if (!box) return false;
+      if (ui.ai && box.contains(ui.ai)) return true;
+      if (box.querySelector(".empty") || box.querySelector(".follow-hint")) replaceChildren(box);
+      ui.ai = el("div", { class: "msg assistant pending" });
+      ui.answer = el("div", { class: "msg-body answer" });
+      ui.ai.appendChild(ui.answer);
+      ui.reasonBlock = null;
+      if (ui.rawReasoning) {
+        ui.reasonBlock = makeReasoningBlock(ui.ai);
+        ui.reasonBlock.wrap.open = true;
+        renderReasoning(ui.reasonBlock, ui.rawReasoning, true);
+      }
+      if (ui.raw) setMd(ui.answer, ui.raw, true);
+      box.appendChild(ui.ai);
+      stickThreadBottom(box);
+      return true;
+    }
+    if (sessionId) chatLive[sessionId] = { paperId: paperId, followKind: followKind, ensure: ensure };
+    function stillHere() { return visible(); }
+    function finish(aborted) {
+      if (sessionId && chatLive[sessionId] && chatLive[sessionId].ensure === ensure) delete chatLive[sessionId];
+      if (ui.ai) ui.ai.classList.remove("pending");
+      syncStreaming();
+      if (!stillHere()) return;
       if (aborted) toast(function () { return I18n.t("ui.459a568188e8"); }, "warn", 5000);
       if (followKind) {
         if (document.querySelector("#follow-messages .msg-edit")) return;
@@ -1962,26 +2111,35 @@
       if (document.querySelector("#messages .msg-edit")) return;
       loadSessions(true);
       loadChatMessages();
-    };
+    }
+    ensure();
     streamSSE(url, payload, {
       kind: "chat",
+      paperId: paperId,
+      sessionId: sessionId,
+      scope: followKind,
       onDelta: function (delta, reasoning) {
+        if (reasoning) ui.rawReasoning += reasoning;
+        if (delta) ui.raw += delta;
+        if (!ensure()) return;
+        var box = followKind ? $("follow-messages") : $("messages");
+        var scroller = threadScroller(box);
         var nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 90;
         if (reasoning) {
-          if (!reasonBlock) { reasonBlock = makeReasoningBlock(ai); reasonBlock.wrap.open = true; }
-          rawReasoning += reasoning;
-          renderReasoning(reasonBlock, rawReasoning, true);
+          if (!ui.reasonBlock) { ui.reasonBlock = makeReasoningBlock(ui.ai); ui.reasonBlock.wrap.open = true; }
+          renderReasoning(ui.reasonBlock, ui.rawReasoning, true);
         }
-        if (delta) { raw += delta; setMd(answer, raw, true); }
+        if (delta) setMd(ui.answer, ui.raw, true);
         if (nearBottom) requestAnimationFrame(function () { scroller.scrollTop = scroller.scrollHeight; });
       },
       onDone: function () { finish(false); },
       onCancelled: function () { finish(true); },
       onAborted: function () { finish(true); },
       onError: function (errMsg) {
-        ai.classList.remove("pending");
-        state.streaming = false;
-        setSendButton(false);
+        if (sessionId && chatLive[sessionId] && chatLive[sessionId].ensure === ensure) delete chatLive[sessionId];
+        if (ui.ai) ui.ai.classList.remove("pending");
+        syncStreaming();
+        if (!stillHere()) return;
         toast(function () { return I18n.t("ui.cfa7c64f924a") + I18n.value(errMsg); }, "err");
         if (followKind) {
           if (artifactView === followKind && !document.querySelector("#follow-messages .msg-edit")) loadFollowThread(followKind, true);
@@ -1992,6 +2150,7 @@
         loadChatMessages();
       },
     });
+    syncStreaming();
   }
   function sendMessage() {
     if (state.streaming) return;
@@ -2005,59 +2164,83 @@
       return;
     }
     var paperId = state.currentPaper.id;
+    dropSend[paperId] = false;
     state.streaming = true; setSendButton(true);
     var start = function (sid) {
-      if (!state.currentPaper || state.currentPaper.id !== paperId || (followKind ? artifactView !== followKind : artifactView !== "chat")) {
-        state.streaming = false; setSendButton(false); return;
+      if (dropSend[paperId]) { syncStreaming(); return; }
+      var stillHere = state.currentPaper && state.currentPaper.id === paperId
+        && (followKind ? artifactView === followKind : artifactView === "chat");
+      if (stillHere) {
+        if (followKind) state.followSessions[followKind] = sid;
+        else state.currentSessionId = sid;
+        input.value = "";
+        var box = followKind ? $("follow-messages") : $("messages");
+        if (box.querySelector(".empty") || box.querySelector(".follow-hint")) replaceChildren(box);
+        var userNode = el("div", { class: "msg user" });
+        var userBody = el("div", { class: "msg-body" });
+        setMd(userBody, content);
+        userNode.appendChild(userBody);
+        box.appendChild(userNode);
       }
-      if (followKind) state.followSessions[followKind] = sid;
-      else state.currentSessionId = sid;
-      input.value = "";
-      var box = followKind ? $("follow-messages") : $("messages");
-      if (box.querySelector(".empty") || box.querySelector(".follow-hint")) replaceChildren(box);
-      var userNode = el("div", { class: "msg user" });
-      var userBody = el("div", { class: "msg-body" });
-      setMd(userBody, content);
-      userNode.appendChild(userBody);
-      box.appendChild(userNode);
-      beginAssistantStream("/api/sessions/" + sid + "/messages", { content: content });
+      beginAssistantStream("/api/sessions/" + sid + "/messages", { content: content }, {
+        paperId: paperId, sessionId: sid, followKind: followKind,
+      });
     };
 
     var existing = followKind ? state.followSessions[followKind] : state.currentSessionId;
     if (existing) start(existing);
-    else api.post("/api/papers/" + state.currentPaper.id + "/sessions", { scope: followKind || "chat" }).then(function (s) {
-      if (!state.currentPaper || state.currentPaper.id !== paperId) { state.streaming = false; setSendButton(false); return; }
-      if (!followKind) {
+    else api.post("/api/papers/" + paperId + "/sessions", { scope: followKind || "chat" }).then(function (s) {
+      if (!followKind && state.currentPaper && state.currentPaper.id === paperId && artifactView === "chat") {
         state.sessions.unshift(s);
         var sel = $("session-select");
-        sel.appendChild(el("option", { value: String(s.id), text: function () { return s.title || I18n.t("ui.64d26a4dd05e"); } }));
+        var blank = sel.querySelector('option[value=""]');
+        if (blank) blank.remove();
+        sel.appendChild(el("option", { value: String(s.id), text: function () { return s.title || I18n.t("chat.fresh"); } }));
         sel.value = String(s.id);
       }
       start(s.id);
-    }).catch(function (e) { state.streaming = false; setSendButton(false); toast(function () { return e.message; }, "err"); });
+    }).catch(function (e) { syncStreaming(); toast(function () { return e.message; }, "err"); });
   }
 
   // ---------------- 流式请求的中止（「终止」按钮） ----------------
   // 只 abort 连接是拦不住服务端的：SSE 生成器跑在服务端线程里，会继续把模型输出读完。
   // 所以统一先调 POST /api/cancel/{token} 置位服务端标记，再 abort 掉前端连接。
-  var activeStream = null;      // {token, controller, kind, onAborted}
+  var liveStreams = [];          // 可以并行。换论文不会把它们从这里摘掉
+  var chatLive = {};             // sessionId -> 还在生成的那条回复，切回来时再画上
+  var dropSend = {};             // paperId -> 发送按钮在请求发出前被按成了停止
 
   function newToken() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID().replace(/-/g, "");
     return "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   }
 
-  function stopActiveStream() {
-    if (!activeStream) return false;
-    var cur = activeStream;
-    activeStream = null;
-    api.post("/api/cancel/" + encodeURIComponent(cur.token), {})
+  function findStream(pred) {
+    for (var i = 0; i < liveStreams.length; i++) if (pred(liveStreams[i])) return liveStreams[i];
+    return null;
+  }
+  function dropStream(token) {
+    liveStreams = liveStreams.filter(function (s) { return s.token !== token; });
+  }
+  function viewingChatStream(stream) {
+    if (!state.currentPaper || stream.paperId !== state.currentPaper.id) return false;
+    if (stream.kind === "skill") return artifactView === "chat";
+    return stream.kind === "chat" && chatStreamVisible(stream.paperId, stream.sessionId, stream.scope || "");
+  }
+  function syncStreaming() {
+    state.streaming = liveStreams.some(viewingChatStream);
+    setSendButton(state.streaming);
+  }
+  function stopStream(stream) {
+    if (!stream) return false;
+    dropStream(stream.token);
+    api.post("/api/cancel/" + encodeURIComponent(stream.token), {})
       .then(function (res) {
         if (!res || res.stopped === false) toast(function () { return I18n.t("ui.e44176e69469"); }, "info");
       })
       .catch(function () { /* 取消失败也要把前端连接断掉 */ })
-      .then(function () { if (cur.controller) cur.controller.abort(); });
-    if (cur.onAborted) cur.onAborted();
+      .then(function () { if (stream.controller) stream.controller.abort(); });
+    if (stream.onAborted) stream.onAborted();
+    syncStreaming();
     return true;
   }
 
@@ -2069,9 +2252,15 @@
     var payload = body || {};
     if (payload.cancel_token === undefined) payload.cancel_token = token;
     var stopped = false;
-    activeStream = { token: token, controller: controller, kind: (handlers && handlers.kind) || "stream",
-                     onAborted: function () { stopped = true; if (handlers.onAborted) handlers.onAborted(); } };
-    var finish = function () { if (activeStream && activeStream.token === token) activeStream = null; };
+    var stream = {
+      token: token, controller: controller, kind: (handlers && handlers.kind) || "stream",
+      paperId: handlers && handlers.paperId, sessionId: handlers && handlers.sessionId,
+      scope: (handlers && handlers.scope) || "",
+      onAborted: function () { stopped = true; if (handlers.onAborted) handlers.onAborted(); },
+    };
+    liveStreams.push(stream);
+    syncStreaming();
+    var finish = function () { dropStream(token); syncStreaming(); };
     fetch(url, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload), signal: controller ? controller.signal : undefined,
@@ -2140,8 +2329,14 @@
   }
 
   function stopChat() {
-    if (!state.streaming) return;
-    if (!stopActiveStream()) return;
+    if (!state.currentPaper) return;
+    var paperId = state.currentPaper.id;
+    var stream = findStream(function (s) {
+      return s.kind === "chat" && s.paperId === paperId && s.sessionId === activeSessionId();
+    }) || findStream(function (s) { return s.kind === "skill" && s.paperId === paperId; });
+    if (stream) { stopStream(stream); return; }
+    // 会话还在创建、生成请求还没发出去：这次发送取消，已经在跑的后台任务不动
+    dropSend[paperId] = true;
     state.streaming = false;
     setSendButton(false);
   }
@@ -2152,6 +2347,7 @@
     var paper = state.currentPaper;
     if (!paper) { toast(function () { return I18n.t("ui.7912dc9e9b8b"); }, "err"); return Promise.resolve(); }
     if (artifactView !== "chat") showChatView();
+    var skillPaper = paper.id;
     var box = $("messages");
     if (box.querySelector(".empty")) replaceChildren(box);
     var asks = el("div", { class: "msg user" }); setMd(asks, I18n.t("ui.024a673fc140") + skillName);
@@ -2160,10 +2356,12 @@
     var answer = el("div", { class: "answer" }); ai.appendChild(answer);
     box.appendChild(ai); box.scrollTop = box.scrollHeight;
     var raw = "", rawReasoning = "", block = null;
-    state.streaming = true; $("send-btn").disabled = true;
     return streamSSE("/api/papers/" + paper.id + "/skills/" + skillName + "?stream=true", {},
       {
+        kind: "skill",
+        paperId: skillPaper,
         onDelta: function (delta, reasoning) {
+          if (!state.currentPaper || state.currentPaper.id !== skillPaper || artifactView !== "chat") return;
           var nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 90;
           if (reasoning) {
             if (!block) { block = makeReasoningBlock(ai); block.wrap.open = true; }
@@ -2174,16 +2372,20 @@
           if (nearBottom) requestAnimationFrame(function () { box.scrollTop = box.scrollHeight; });
         },
         onDone: function (payload) {
-          ai.classList.remove("pending");
-          setMd(answer, raw || (payload && payload.output) || "");
-          if (block) { renderReasoning(block, rawReasoning, false); block.wrap.open = false; }
-          state.streaming = false; $("send-btn").disabled = false;
+          if (box.contains(ai)) {
+            ai.classList.remove("pending");
+            setMd(answer, raw || (payload && payload.output) || "");
+            if (block) { renderReasoning(block, rawReasoning, false); block.wrap.open = false; }
+          }
+          syncStreaming();
           toast(function () { return I18n.t("ui.5f0394777472") + skillName; }, "info");
         },
         onError: function (msg) {
-          ai.classList.remove("pending");
-          box.appendChild(el("div", { class: "msg error", text: function () { return I18n.t("ui.b915bde73559") + I18n.value(msg); } }));
-          state.streaming = false; $("send-btn").disabled = false;
+          if (box.contains(ai)) {
+            ai.classList.remove("pending");
+            box.appendChild(el("div", { class: "msg error", text: function () { return I18n.t("ui.b915bde73559") + I18n.value(msg); } }));
+          }
+          syncStreaming();
         },
       });
   }
@@ -2904,7 +3106,9 @@
     $("new-session").addEventListener("click", newSession);
     $("delete-session").addEventListener("click", deleteSession);
     $("session-select").addEventListener("change", function () {
-      state.currentSessionId = parseInt($("session-select").value, 10) || null; loadMessages();
+      state.currentSessionId = parseInt($("session-select").value, 10) || null;
+      syncStreaming();
+      loadMessages();
     });
 
     $("open-sync").addEventListener("click", openSync);
@@ -3084,6 +3288,7 @@
   // ---------------- 启动 ----------------
   function init() {
     bind();
+    fillSessionSelect([]);
     window.addEventListener("reader-language", function (event) {
       if (state.outputLanguage !== event.detail) applyLanguage(event.detail);
     });
