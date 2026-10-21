@@ -156,8 +156,27 @@ def _arxiv_id_of(fields):
     return None
 
 
+def _translation_kind(filename):
+    """判断附件是不是「已翻译好的 PDF」：pdf2zh 系产物命名 xxx.mono.pdf /
+    xxx.dual.pdf / xxx.compare.pdf，或文件名带 对照/双语/翻译。返回 "mono"/"dual"/None。"""
+    lower = (filename or "").lower()
+    if re.search(r"[.\-_]mono\.pdf$", lower):
+        return "mono"
+    if re.search(r"[.\-_](dual|compare)\.pdf$", lower):
+        return "dual"
+    if re.search(r"(对照|双语)", filename or ""):
+        return "dual"
+    if re.search(r"[.\-_]mono[.\-_]", lower):
+        return "mono"
+    return None
+
+
 def scan(zotero_dir):
-    """扫描 Zotero 库：返回可导入条目（含 PDF 的）与统计。"""
+    """扫描 Zotero 库：返回可导入条目（含 PDF 的）与统计。
+
+    同一 parent 条目可能挂多个 PDF：第一个非翻译附件当正文；mono/dual/compare
+    这类「已翻译好的 PDF」收进 translations，导入时登记为已完成的全文翻译任务；
+    其余多余附件（附录等）跳过并计数。"""
     zotero_dir = validate_dir(zotero_dir)
     conn, tmp = _open_copy(zotero_dir)
     try:
@@ -170,37 +189,57 @@ def scan(zotero_dir):
             "JOIN items i ON a.itemID = i.itemID "
             "WHERE a.contentType='application/pdf' AND a.parentItemID IS NOT NULL "
             "ORDER BY a.parentItemID, a.itemID").fetchall()
-        # 一篇条目可能挂多个 PDF（正文+附录/重复抓取）：一篇只取最早挂上的那个
         by_parent = {}
         for row in rows:
-            by_parent.setdefault(row["parentItemID"], row)
-        rows = sorted(by_parent.values(), key=lambda r: r["itemID"])
-        parent_ids = [r["parentItemID"] for r in rows]
+            by_parent.setdefault(row["parentItemID"], []).append(row)
+        parent_ids = sorted(by_parent)
         fields = _item_fields(conn, _field_map(conn), parent_ids)
         creators = _item_creators(conn, parent_ids)
         cols, membership = _collections(conn)
+        notes = conn.execute("SELECT COUNT(*) FROM itemNotes").fetchone()[0]
 
         papers = []
         missing_file = 0
-        for row in rows:
-            stored = row["path"] or ""
-            if not stored.startswith("storage:"):
-                continue                      # 链接式附件/快照不在本机，跳过
-            filename = stored.split(":", 1)[1].strip()
-            pdf = os.path.join(zotero_dir, "storage", row["key"], filename)
-            if not os.path.isfile(pdf):
-                missing_file += 1
+        extra_pdfs = 0
+        for pid in parent_ids:
+            primaries = []
+            translations = []
+            for row in by_parent[pid]:
+                stored = row["path"] or ""
+                if not stored.startswith("storage:"):
+                    continue                  # 链接式附件/快照不在本机，跳过
+                filename = stored.split(":", 1)[1].strip()
+                pdf = os.path.join(zotero_dir, "storage", row["key"], filename)
+                if not os.path.isfile(pdf):
+                    continue                  # 文件没同步到本机：不计入
+                kind = _translation_kind(filename)
+                entry = {"kind": kind, "pdf_path": pdf, "name": filename}
+                (translations if kind else primaries).append(entry)
+            if not primaries:
+                missing_file += 1             # 条目在本机没有正文 PDF
                 continue
-            meta = fields.get(row["parentItemID"], {})
+            extra_pdfs += len(primaries) - 1
+            # 译文每种版式（mono/dual）只留最早一个
+            seen_kinds = set()
+            kept_translations = []
+            for t in translations:
+                if t["kind"] in seen_kinds:
+                    continue
+                seen_kinds.add(t["kind"])
+                kept_translations.append(t)
+            primary = primaries[0]
+            meta = fields.get(pid, {})
+            filename = primary["name"]
             title = (meta.get("title") or "").strip() or os.path.splitext(filename)[0]
             papers.append({
                 "title": title,
-                "authors": creators.get(row["parentItemID"], []),
+                "authors": creators.get(pid, []),
                 "published": (meta.get("date") or "").strip() or None,
                 "abstract": (meta.get("abstractNote") or "").strip(),
                 "arxiv_id": _arxiv_id_of(meta),
-                "pdf_path": pdf,
-                "collections": sorted(membership.get(row["parentItemID"], [])),
+                "pdf_path": primary["pdf_path"],
+                "translations": kept_translations,
+                "collections": sorted(membership.get(pid, [])),
             })
         papers.sort(key=lambda p: p["title"].lower())
         return {
@@ -211,6 +250,9 @@ def scan(zotero_dir):
                 "missing_file": missing_file,
                 "collections": len(cols),
                 "arxiv": sum(1 for p in papers if p["arxiv_id"]),
+                "translations": sum(len(p["translations"]) for p in papers),
+                "extra_pdfs": extra_pdfs,
+                "notes": notes,
             },
         }
     finally:
@@ -262,14 +304,71 @@ def _pick_collection(collections):
     return sorted(collections, key=lambda p: (-p.count("/"), p))[0]
 
 
+def _import_translations(db, paper, translations):
+    """把 Zotero 里已翻译好的附件登记为「已完成」的全文翻译任务：
+    文件复制进翻译输出目录（pdftranslate/output/task-<id>/），mono/dual 路径入任务，
+    阅读器里的 原文/对照版 切换立即可用。已有同版式译文时不重复登记。
+    返回是否实际新增了译文。"""
+    import datetime as _dt
+
+    from .models import PdfTranslationTask
+    from .pdftranslate import env as pdf_env
+
+    done_tasks = (db.query(PdfTranslationTask)
+                  .filter_by(paper_id=paper.id, status="done").all())
+    have_mono = any(t.mono_path and os.path.isfile(t.mono_path) for t in done_tasks)
+    have_dual = any(t.dual_path and os.path.isfile(t.dual_path) for t in done_tasks)
+    want = {}
+    for t in translations or []:
+        want.setdefault(t["kind"], t)
+    if (have_mono or "mono" not in want) and (have_dual or "dual" not in want):
+        return False
+
+    task = PdfTranslationTask(
+        paper_id=paper.id, status="done", progress=100,
+        message="来自 Zotero 的已有译文",
+        options_json=json.dumps({"source": "zotero"}, ensure_ascii=False),
+        finished_at=_dt.datetime.utcnow())
+    db.add(task)
+    db.flush()                                   # 拿到 task.id 组织输出目录
+    dest_dir = os.path.join(pdf_env.output_dir(), "task-{}".format(task.id))
+    os.makedirs(dest_dir, exist_ok=True)
+    copied = False
+    for kind, has in (("mono", have_mono), ("dual", have_dual)):
+        entry = want.get(kind)
+        if not entry or has:
+            continue
+        try:
+            stem = arxiv_service.safe_dirname(os.path.splitext(entry["name"])[0])[:80] or "translation"
+            dest = os.path.join(dest_dir, "{}.{}.pdf".format(stem, kind))
+            shutil.copy2(entry["pdf_path"], dest)
+        except OSError as exc:
+            logger.info("Zotero 译文复制失败（%s）：%s", entry["name"], str(exc)[:200])
+            continue
+        if kind == "mono":
+            task.mono_path = dest
+        else:
+            task.dual_path = dest
+        copied = True
+    if not copied:
+        db.delete(task)
+        db.flush()
+        return False
+    return True
+
+
 def import_library(db, papers, zotero_dir, use_collections, on_progress, cancel):
-    """执行导入；返回统计。每个条目独立容错（坏 PDF 记 failed 继续）。"""
+    """执行导入；返回统计。每个条目独立容错（坏 PDF 记 failed 继续）。
+
+    已在库中的论文不重复导入，但若 Zotero 条目带有「已翻译好的 PDF」而该论文
+    还没有对应版式的译文任务，会把译文补进来（重复执行即可补齐历史译文）。"""
     from harness.config import get_pdf_dir
 
     existing = {row[0] for row in
                 db.query(Paper.arxiv_id).filter(Paper.arxiv_id.isnot(None)).all()}
     folder_cache = {}
-    stats = {"imported": 0, "skipped_existing": 0, "failed": 0, "folders": 0}
+    stats = {"imported": 0, "skipped_existing": 0, "failed": 0, "folders": 0,
+             "translations_added": 0}
     total = len(papers)
     on_progress("copy", 0, total, "")
 
@@ -284,7 +383,13 @@ def import_library(db, papers, zotero_dir, use_collections, on_progress, cancel)
             digest = hashlib.sha256(content).hexdigest()
             paper_id = item["arxiv_id"] or (LOCAL_ID_PREFIX + digest[:16])
             if paper_id in existing:
-                stats["skipped_existing"] += 1
+                paper = db.query(Paper).filter(Paper.arxiv_id == paper_id).first()
+                if (paper is not None and item.get("translations")
+                        and _import_translations(db, paper, item["translations"])):
+                    db.commit()
+                    stats["translations_added"] += 1
+                else:
+                    stats["skipped_existing"] += 1
                 continue
 
             folder = None
@@ -322,6 +427,10 @@ def import_library(db, papers, zotero_dir, use_collections, on_progress, cancel)
                 full_text=text,
             )
             db.add(paper)
+            db.flush()                           # 先拿 paper.id 再登记译文任务
+            if item.get("translations"):
+                if _import_translations(db, paper, item["translations"]):
+                    stats["translations_added"] += 1
             db.commit()
             existing.add(paper_id)
             stats["imported"] += 1

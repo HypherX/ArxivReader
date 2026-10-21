@@ -2705,7 +2705,8 @@
       var r = job.result || {};
       toast(function () {
         return I18n.t("zotero.done", {
-          imported: r.imported || 0, skipped: r.skipped_existing || 0, failed: r.failed || 0,
+          imported: r.imported || 0, skipped: r.skipped_existing || 0,
+          translations: r.translations_added || 0, failed: r.failed || 0,
         });
       }, "ok");
       loadFolders();
@@ -2763,6 +2764,7 @@
       el.textContent = I18n.t("zotero.scan_result", {
         with_pdf: s.with_pdf || 0, arxiv: s.arxiv || 0, collections: s.collections || 0,
         already: s.already_in_library || 0, missing: s.missing_file || 0,
+        translations: s.translations || 0, notes: s.notes || 0,
       });
       $("zotero-collections-row").classList.toggle("hidden", !(s.collections > 0));
       $("zotero-import").disabled = !(s.with_pdf > 0);
