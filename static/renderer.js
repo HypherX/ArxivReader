@@ -119,7 +119,25 @@
           h.id = "reading-heading-" + (++headingId);
           var a = document.createElement("a");
           a.href = "#" + h.id; I18n.write(a, h.textContent);
-          a.onclick = function (event) { event.preventDefault(); h.scrollIntoView({ block: "start" }); };
+          a.onclick = function (event) {
+            event.preventDefault();
+            // 不能用 scrollIntoView：它会顺带滚动所有可滚动祖先（overflow:hidden 的也算），
+            // 把 #layout / body 顶出可视区，页面错位且用户拉不回来。只滚最近的内容容器。
+            var scroller = null, el = h.parentElement;
+            while (el && el !== document.body) {
+              var oy = getComputedStyle(el).overflowY;
+              if (oy === "auto" || oy === "scroll") { scroller = el; break; }
+              el = el.parentElement;
+            }
+            if (scroller) {
+              var top = h.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop - 12;
+              // 瞬时跳转：smooth 动画在后台/节流的渲染进程里不推进，目录点击会“没反应”
+              scroller.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+            } else {
+              var y = h.getBoundingClientRect().top + (window.scrollY || 0) - 12;
+              window.scrollTo({ top: Math.max(0, y), behavior: "auto" });
+            }
+          };
           toc.appendChild(a);
         });
         node.prepend(toc);
