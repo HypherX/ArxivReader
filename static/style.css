@@ -547,12 +547,19 @@ button.mini.primary:hover { color: #fff; filter: brightness(1.05); }
 .ctx-status b { font-weight: 700; }
 
 #messages {
-  flex: 1; overflow-y: auto; padding: 18px 16px;
+  flex: 1; min-height: 0; overflow-y: auto; padding: 18px 16px;
   display: flex; flex-direction: column; gap: 12px;
   background: radial-gradient(620px 320px at 100% 0%, var(--panel-soft) 0%, rgba(247, 249, 253, 0) 70%);
   /* 桌面壳默认禁止整页选中。对话、推理和阅读产物要能拖选一部分再复制。 */
   user-select: text; -webkit-user-select: text; cursor: text;
 }
+/* 空出的高度交给这段，消息就落在输入框上方，对话区才是整栏而不是贴在顶上的一小块 */
+#messages::before {
+  content: "";
+  flex: 1 1 auto;
+  min-height: 0;
+}
+#messages:has(.empty)::before { content: none; }
 #av-body { user-select: text; -webkit-user-select: text; cursor: text; }
 .msg.user ::selection { background: rgba(255, 255, 255, .88); color: #241b52; }
 .msg {
@@ -1149,11 +1156,22 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .av-ops { flex: 1 1 100%; display: flex; justify-content: flex-end; gap: 6px; }
-.av-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-.av-body { padding: 6px 16px 8px; font-size: 13px; color: var(--text-soft); }
+.av-scroll {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+.av-body { flex: 0 0 auto; padding: 6px 16px 8px; font-size: 13px; color: var(--text-soft); }
 #follow-messages {
+  flex: 1 0 auto; min-height: 0;
   display: flex; flex-direction: column; gap: 12px;
-  padding: 4px 16px 28px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-soft);
+}
+#follow-messages::before {
+  content: "";
+  flex: 1 1 auto;
+  min-height: 0;
 }
 #follow-messages .follow-hint { color: var(--muted); font-size: 12px; line-height: 1.55; padding-top: 8px; }
 #chat-pane.follow-mode .chat-head-actions { display: none; }

@@ -18,6 +18,7 @@
 .reading-focus #artifact-view { position: fixed; inset: 16px max(16px, calc((100vw - 960px)/2)); z-index: 80; background: white; border: 1px solid #dce2eb; box-shadow: 0 0 0 100vmax #edf1f8ed; border-radius: 12px; }
 .reading-focus #av-scroll { background: #fff; }
 .reading-focus .av-body, .reading-focus #follow-messages { max-width: 86ch; width: 100%; margin-left: auto; margin-right: auto; }
+.reading-focus #follow-messages { background: transparent; border-top: 0; }
 .reader-page { margin: 0; background: #f6f8fb; font-family: system-ui, sans-serif; }
 .reader-page header { position: sticky; top: 0; z-index: 2; padding: 12px 24px; background: #ffffffef; border-bottom: 1px solid #dce2eb; display: flex; gap: 16px; align-items: center; }
 .reader-page article { max-width: 82ch; margin: 30px auto; padding: 28px 40px; background: white; border: 1px solid #e2e7ee; border-radius: 12px; }
