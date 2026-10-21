@@ -10,6 +10,7 @@
 """
 
 import hashlib
+import datetime
 import json
 import logging
 import os
@@ -232,6 +233,43 @@ def update_paper(paper_id: int, body: schemas.PaperUpdate,
         if not title:
             raise HTTPException(status_code=400, detail="标题不能为空")
         paper.title = title
+    db.commit()
+    db.refresh(paper)
+    return paper
+
+
+@router.post("/{paper_id}/reading-progress", response_model=schemas.PaperOut)
+def report_reading_progress(paper_id: int, body: schemas.ReadingProgressIn,
+                            db: Session = Depends(database.get_db)):
+    """阅读进度上报（前端节流调用）：最远页只增不减，时长累加，单次上报上限 1 小时防呆。"""
+    paper = _get_paper_or_404(db, paper_id)
+    if body.pages > 0:
+        paper.read_pages = body.pages
+    if body.page > 0:
+        paper.read_page = max(paper.read_page, min(body.page, paper.read_pages or body.page))
+    if body.seconds > 0:
+        paper.read_seconds += min(int(body.seconds), 3600)
+    if body.page > 0 or body.seconds > 0:
+        paper.last_read_at = datetime.datetime.utcnow()
+    db.commit()
+    db.refresh(paper)
+    return paper
+
+
+@router.post("/{paper_id}/reading-mark", response_model=schemas.PaperOut)
+def mark_reading(paper_id: int, body: schemas.ReadingMarkIn,
+                 db: Session = Depends(database.get_db)):
+    """手动标记已读完 / 未读。标已读时若还不知道总页数，用已知最远页兜底成 100%。"""
+    paper = _get_paper_or_404(db, paper_id)
+    if body.read:
+        total = max(paper.read_pages, paper.read_page, 1)
+        paper.read_pages = total
+        paper.read_page = total
+        paper.last_read_at = datetime.datetime.utcnow()
+    else:
+        paper.read_page = 0
+        paper.read_seconds = 0
+        paper.last_read_at = None
     db.commit()
     db.refresh(paper)
     return paper

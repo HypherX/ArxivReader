@@ -61,6 +61,20 @@ class PaperUpdate(BaseModel):
     title: Optional[str] = None
 
 
+class ReadingProgressIn(BaseModel):
+    """阅读进度上报：page 为当前读到的页码，pages 为总页数，seconds 为本次新增的阅读秒数。"""
+
+    page: int = 0
+    pages: int = 0
+    seconds: int = 0
+
+
+class ReadingMarkIn(BaseModel):
+    """手动标记：read=True 标为已读完，False 标为未读（清零进度）。"""
+
+    read: bool
+
+
 class PaperOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -79,6 +93,12 @@ class PaperOut(BaseModel):
     has_text: bool = False
     text_chars: int = 0
     added_at: Optional[datetime.datetime] = None
+    read_page: int = 0
+    read_pages: int = 0
+    read_seconds: int = 0
+    read_percent: int = 0
+    read_state: str = "unread"
+    last_read_at: Optional[datetime.datetime] = None
 
 
 # ---------------- Chat ----------------

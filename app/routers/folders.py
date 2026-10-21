@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from knowledge import store as knowledge_store, translation
 
 from .. import database, schemas, settings_store
+from .. import folder_classify
 from ..models import DirectionNode, Folder, Paper
 
 router = APIRouter(prefix="/api/folders", tags=["folders"])
@@ -111,6 +112,25 @@ def update_folder(folder_id: int, body: schemas.FolderUpdate,
         raise HTTPException(status_code=400, detail=str(exc))
     db.refresh(folder)
     return folder
+
+
+@router.post("/{folder_id}/auto-classify")
+def start_auto_classify(folder_id: int, db: Session = Depends(database.get_db)):
+    """一键自动分小类：后台线程跑一次 LLM 分组并移动当前层论文，返回任务状态供轮询。"""
+    try:
+        return folder_classify.start_task(folder_id)
+    except folder_classify.ClassifyError as exc:
+        raise HTTPException(status_code=400, detail={"code": exc.code, "params": exc.params})
+
+
+@router.get("/{folder_id}/auto-classify")
+def get_auto_classify(folder_id: int):
+    """轮询自动分小类任务状态；从未运行过时 state 为 idle。"""
+    task = folder_classify.get_task(folder_id)
+    if task is None:
+        return {"folder_id": folder_id, "state": "idle", "total": 0, "error": "",
+                "error_code": "", "error_params": {}, "groups": [], "moved": 0, "skipped": 0}
+    return task
 
 
 @router.delete("/{folder_id}", status_code=204)

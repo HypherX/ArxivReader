@@ -21,6 +21,7 @@
     outputLanguage: "zh",
     onlyCurrent: false,
     folderSearch: "",
+    sortBy: "added_desc",
   };
 
   // ---------------- 小工具 ----------------
@@ -401,9 +402,12 @@
   }
   function selectFolder(id) {
     state.selectedFolderId = id;
+    if (id !== null) ensurePane("list");   // 点文件夹自动展开列表栏
     $("folder-all").classList.toggle("selected", id === null);
     $("folder-scope").classList.toggle("hidden", id === null);
     var node = id !== null ? state.folderMap[id] : null;
+    // 方向文件夹（🧭）由阅读流程维护，不出「自动分小类」入口
+    $("folder-classify").classList.toggle("hidden", !node || !!node.direction_node_id);
     var path = [], cursor = node;
     while (cursor) { path.unshift(cursor); cursor = state.folderMap[cursor.parent_id]; }
     var bread = $("folder-breadcrumb"); replaceChildren(bread);
@@ -414,6 +418,48 @@
         onclick: function () { selectFolder(part.id); } }));
     });
     renderFolderTree(); loadPapers();
+  }
+  /** 文件夹一键自动分小类：确认 -> 启动后台任务 -> 轮询到完成 -> 刷新树与列表。 */
+  function classifyFolder() {
+    var folderId = state.selectedFolderId, node = state.folderMap[folderId];
+    if (folderId === null || !node) return;
+    askConfirm(function () { return I18n.t("ui.b7f3e8a1c206"); }, [
+      function () { return I18n.t("ui.b7f3e8a1c207", { name: node.path || node.name }); },
+      function () { return I18n.t("ui.b7f3e8a1c208"); },
+    ], { okText: function () { return I18n.t("ui.b7f3e8a1c209"); } }).then(function (ok) {
+      if (!ok) return null;
+      var btn = $("folder-classify");
+      btn.disabled = true;
+      I18n.bind(btn, function () { return I18n.t("ui.b7f3e8a1c210"); });
+      var done = function () {
+        btn.disabled = false;
+        I18n.bind(btn, function () { return I18n.t("ui.b7f3e8a1c206"); });
+      };
+      var poll = function () {
+        return api.get("/api/folders/" + folderId + "/auto-classify").then(function (task) {
+          if (task.state === "running") return new Promise(function (resolve) {
+            setTimeout(function () { resolve(poll()); }, 1500);
+          });
+          done();
+          if (task.state === "failed") {
+            toast(function () {
+              if (task.error_code && I18n.messages[task.error_code]) return I18n.t(task.error_code, task.error_params || {});
+              return I18n.t("ui.b7f3e8a1c212") + (task.error || "");
+            }, "err");
+            return null;
+          }
+          toast(function () {
+            return I18n.t("ui.b7f3e8a1c213", { groups: (task.groups || []).length,
+                                                moved: task.moved || 0, skipped: task.skipped || 0 });
+          }, "ok");
+          loadFolders(); loadPapers();
+          return null;
+        });
+      };
+      return api.post("/api/folders/" + folderId + "/auto-classify", {})
+        .then(poll)
+        .catch(function (e) { done(); toast(function () { return e.message; }, "err"); });
+    });
   }
   function moveFolder(node) {
     askChoice(function () { return I18n.t("folder.move_title", { name: node.path || node.name }); }, [function () { return I18n.t("ui.72f97fe684b3"); }],
@@ -1673,6 +1719,40 @@
 
 
   // ---------------- 论文列表 ----------------
+  /** 客户端排序：列表一次性取回，切换排序即时生效，不重新请求。 */
+  function sortedPapers() {
+    var list = state.papers.slice();
+    if (state.sortBy === "title") {
+      list.sort(function (a, b) { return (a.title || a.arxiv_id).localeCompare(b.title || b.arxiv_id, "zh-Hans-CN"); });
+    } else if (state.sortBy === "added_asc") {
+      list.sort(function (a, b) { return String(a.added_at || "").localeCompare(String(b.added_at || "")) || a.id - b.id; });
+    } else if (state.sortBy === "progress") {
+      // 未读优先：0% 最前，已读完垫底；同进度按添加时间新→旧
+      list.sort(function (a, b) { return (a.read_percent || 0) - (b.read_percent || 0) ||
+        String(b.added_at || "").localeCompare(String(a.added_at || "")); });
+    } else {
+      list.sort(function (a, b) { return String(b.added_at || "").localeCompare(String(a.added_at || "")) || b.id - a.id; });
+    }
+    return list;
+  }
+  function formatAdded(iso) {
+    if (!iso) return "";
+    var d = new Date(iso.endsWith("Z") || iso.indexOf("+") >= 0 ? iso : iso + "Z");
+    return isNaN(d) ? "" : d.toLocaleDateString(I18n.language() === "en" ? "en-US" : "zh-CN",
+      { year: "numeric", month: "2-digit", day: "2-digit" });
+  }
+  function formatReadSecs(secs) {
+    if (!secs || secs < 60) return "";
+    var mins = Math.round(secs / 60);
+    if (I18n.language() === "en") return mins < 60 ? "~" + mins + " min" : "~" + (mins / 60).toFixed(1) + " h";
+    return mins < 60 ? "约 " + mins + " 分钟" : "约 " + (mins / 60).toFixed(1) + " 小时";
+  }
+  function toggleReadMark(p) {
+    api.post("/api/papers/" + p.id + "/reading-mark", { read: p.read_state !== "finished" }).then(function (updated) {
+      Object.assign(p, updated); renderPapers();
+      toast(function () { return I18n.t(p.read_state === "finished" ? "ui.b7f3e8a1c214" : "ui.b7f3e8a1c215"); }, "ok");
+    }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+  }
   function loadPapers() {
     var qs = [];
     if (state.selectedFolderId !== null) qs.push("folder_id=" + state.selectedFolderId + "&recursive=" + !state.onlyCurrent);
@@ -1695,7 +1775,7 @@
             function () { return I18n.t("ui.24c1450de450"); }));
       return;
     }
-    state.papers.forEach(function (p) {
+    sortedPapers().forEach(function (p) {
       var badges = el("div", { class: "p-meta" });
       (p.categories || []).slice(0, 3).forEach(function (c) { badges.appendChild(el("span", { class: "badge", text: c })); });
       if (p.folder_name) badges.appendChild(el("span", {
@@ -1703,21 +1783,41 @@
         text: p.folder_name,
       }));
       if (!p.has_text) badges.appendChild(el("span", { class: "badge notext", text: function () { return I18n.t("ui.394aa37b1840"); } }));
+      // 阅读状态徽章：未读 / 在读 x% / 已读完
+      if (p.read_state === "finished") badges.appendChild(el("span", { class: "badge read-done", text: function () { return I18n.t("ui.b7f3e8a1c203"); } }));
+      else if (p.read_state === "reading") badges.appendChild(el("span", { class: "badge read-ing", text: function () { return I18n.t("ui.b7f3e8a1c204") + (p.read_percent || 0) + "%"; } }));
+      else badges.appendChild(el("span", { class: "badge read-none", text: function () { return I18n.t("ui.b7f3e8a1c205"); } }));
       var ops = el("div", { class: "p-ops" }, [
+        el("button", { title: function () { return I18n.t(p.read_state === "finished" ? "ui.b7f3e8a1c202" : "ui.b7f3e8a1c201"); },
+          text: p.read_state === "finished" ? "↺" : "✓",
+          onclick: function (e) { e.stopPropagation(); toggleReadMark(p); } }),
         el("button", { title: function () { return I18n.t("ui.95b8cf2c1641"); }, text: "🧠",
           onclick: function (e) { e.stopPropagation(); askAiStepFor(p); } }),
         el("button", { title: function () { return I18n.t("ui.711c5507708d"); }, text: "📁", onclick: function (e) { e.stopPropagation(); openMoveModal(p); } }),
         el("button", { class: "del", title: function () { return I18n.t("ui.b5c234015cf4"); }, text: "🗑", onclick: function (e) { e.stopPropagation(); deletePaper(p); } }),
       ]);
-      var item = el("div", {
-        class: "paper-item" + (state.currentPaper && state.currentPaper.id === p.id ? " active" : ""),
-        "data-id": p.id,
-      }, [
+      // 次信息行：添加日期 · 阅读时长；进度条按完成度填充
+      var sub = el("div", { class: "p-sub" });
+      var added = formatAdded(p.added_at);
+      if (added) sub.appendChild(el("span", { text: added }));
+      var readTime = formatReadSecs(p.read_seconds);
+      if (readTime) sub.appendChild(el("span", { text: readTime }));
+      var children = [
         ops,
         el("div", { class: "p-title", text: p.title || p.arxiv_id }),
         el("div", { class: "p-authors", text: (p.authors || []).join(", ") || "—" }),
         badges,
-      ]);
+      ];
+      if ((p.read_percent || 0) > 0) {
+        children.push(el("div", { class: "p-progress" }, [
+          el("div", { class: "p-progress-fill", style: "width:" + Math.min(100, p.read_percent) + "%" }),
+        ]));
+      }
+      if (sub.childNodes.length) children.push(sub);
+      var item = el("div", {
+        class: "paper-item" + (state.currentPaper && state.currentPaper.id === p.id ? " active" : ""),
+        "data-id": p.id,
+      }, children);
       item.addEventListener("click", function () { selectPaper(p); });
       box.appendChild(item);
     });
@@ -1742,6 +1842,7 @@
       }
     }
     hideNodeGraph();
+    ensurePane("viewer"); ensurePane("chat");   // 点论文自动展开预览与对话栏
     state.currentPaper = p; renderPapers();
     showReader(p);
     FullTranslate.onPaperChanged(p);
@@ -2559,6 +2660,27 @@
       setTimeout(function () { pe.classList.remove("pane-enter"); }, 280);
     }
   }
+  /** 确保某栏是展开的：点文件夹 / 点论文时把相关栏自动带出来，不用手动找开关。 */
+  function ensurePane(name) {
+    var L = loadLayout();
+    if (!L["hide_" + name]) return;
+    L["hide_" + name] = false;
+    saveLayout(L);
+    applyVisibility();
+    var pe = paneEl(name);
+    if (pe) {
+      pe.classList.remove("pane-enter");
+      void pe.offsetWidth;
+      pe.classList.add("pane-enter");
+      setTimeout(function () { pe.classList.remove("pane-enter"); }, 280);
+    }
+    var btn = document.querySelector('.layout-toggles .lt[data-pane="' + name + '"]');
+    if (btn) {
+      btn.classList.remove("just-toggled");
+      void btn.offsetWidth;
+      btn.classList.add("just-toggled");
+    }
+  }
   function startResize(e, rz) {
     var name = rz.getAttribute("data-for");
     var varName = WIDTH_VAR[name]; if (!varName) return;
@@ -2679,6 +2801,12 @@
     $("folder-search").addEventListener("input", function () { state.folderSearch = this.value.trim().toLowerCase(); renderFolderTree(); });
     $("only-current").addEventListener("change", function () { state.onlyCurrent = this.checked; loadPapers(); });
     $("folder-review").addEventListener("click", function () { openReview(state.folderMap[state.selectedFolderId]); });
+    $("folder-classify").addEventListener("click", classifyFolder);
+    $("paper-sort").addEventListener("change", function () {
+      state.sortBy = this.value;
+      ReaderPreferences.setItem("paper_sort", this.value);
+      renderPapers();
+    });
     $("open-reviews").addEventListener("click", function () { openReview(null, true); });
     $("output-language").addEventListener("change", function () {
       var value = this.value;
@@ -3293,6 +3421,8 @@
       if (state.outputLanguage !== event.detail) applyLanguage(event.detail);
     });
     ReaderPreferences.init().then(function () {
+      state.sortBy = ReaderPreferences.getItem("paper_sort") || "added_desc";
+      $("paper-sort").value = state.sortBy;
       applyWidths(); applyVisibility();
       return checkLLMConfigured(false);
     }).then(loadFolders).then(loadPapers).then(function () {

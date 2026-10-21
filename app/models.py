@@ -81,6 +81,11 @@ class Paper(Base):
     # 抽取的论文全文缓存，供对话阅读直塞上下文（整篇保存，不做字符截断）
     full_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     added_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow)
+    # 阅读进度：read_page = 读到过的最远页；read_pages = PDF 总页数；read_seconds = 累计阅读时长
+    read_page: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    read_pages: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    read_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_read_at: Mapped[Optional[datetime.datetime]] = mapped_column(DateTime, nullable=True)
 
     folder: Mapped[Optional["Folder"]] = relationship("Folder", back_populates="papers")
     sessions: Mapped[List["ChatSession"]] = relationship(
@@ -140,6 +145,23 @@ class Paper(Base):
     def text_chars(self) -> int:
         """已缓存全文的字符数，供前端展示“入上下文”规模。"""
         return len(self.full_text or "")
+
+    @property
+    def read_percent(self) -> int:
+        """阅读完成度（0-100）：按"读到过的最远页 / 总页数"估算。"""
+        if self.read_pages <= 0 or self.read_page <= 0:
+            return 0
+        return min(100, round(100 * self.read_page / self.read_pages))
+
+    @property
+    def read_state(self) -> str:
+        """unread（未读）/ reading（在读）/ finished（读完，进度 ≥95% 视为读完）。"""
+        percent = self.read_percent
+        if percent <= 0:
+            return "unread"
+        if percent >= 95:
+            return "finished"
+        return "reading"
 
     @property
     def folder_name(self) -> Optional[str]:
