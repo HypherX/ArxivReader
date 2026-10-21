@@ -35,6 +35,10 @@ _ADDITIVE_COLUMNS = {
                            ("processing_error", "TEXT NOT NULL DEFAULT ''"),
                            ("output_language", "VARCHAR(8) NOT NULL DEFAULT 'unknown'")],
     "folders": [("direction_node_id", "INTEGER")],
+    "papers": [("read_page", "INTEGER NOT NULL DEFAULT 0"),
+               ("read_pages", "INTEGER NOT NULL DEFAULT 0"),
+               ("read_seconds", "INTEGER NOT NULL DEFAULT 0"),
+               ("last_read_at", "DATETIME")],
     "direction_nodes": [("graph_md_path", "TEXT NOT NULL DEFAULT ''"),
                         ("graph_md_at", "DATETIME")],
 }

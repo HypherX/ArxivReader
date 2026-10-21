@@ -326,6 +326,29 @@ button.mini.primary:hover { color: #fff; filter: brightness(1.05); }
 }
 .badge.folder { background: var(--panel-tint); color: #55607a; border-color: var(--border); }
 .badge.folder.direction { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft-2); }
+.badge.read-none { background: transparent; color: #98a2b8; border-color: var(--border); font-weight: 400; }
+.badge.read-ing { background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-border); }
+.badge.read-done { background: #e8f6ee; color: #1a7f4b; border-color: #c4e8d4; }
+.paper-item .p-sub {
+  display: flex; gap: 10px; margin-top: 6px;
+  font-size: 11px; color: #98a2b8;
+}
+.paper-item .p-progress {
+  margin-top: 7px; height: 3px; border-radius: 2px;
+  background: var(--panel-tint); overflow: hidden;
+}
+.paper-item .p-progress-fill {
+  height: 100%; border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent-soft-2), var(--accent));
+  transition: width .3s ease;
+}
+.list-tools { padding: 0 12px 8px; }
+.list-tools select {
+  width: 100%; padding: 5px 8px; font-size: 12px; color: #55607a;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+  outline: none; cursor: pointer;
+}
+.list-tools select:focus { border-color: var(--accent); }
 .badge.trunc { background: var(--warn-bg); color: var(--warn-text); border-color: var(--warn-border); }
 .badge.notext { background: var(--danger-soft); color: var(--danger); border-color: #f3ccd2; }
 
@@ -373,6 +396,20 @@ button.mini.primary:hover { color: #fff; filter: brightness(1.05); }
 #reader-bar .mini.on { background: var(--accent); border-color: transparent; color: #fff; }
 #reader-bar a.mini { text-decoration: none; display: inline-flex; align-items: center; }
 .rb-group { display: flex; align-items: center; gap: 5px; min-width: 0; }
+/* 版本切换 + 译文开关吸附在工具栏右侧：栏窄出横向滚动时也不会被挤出可视区 */
+#reader-bar .rb-tail {
+  position: sticky; right: 0; z-index: 2; flex: none;
+  padding: 2px 0 2px 10px;
+  background: #464b55;                   /* 与阅读栏底色一致，滚动时其他按钮从下面滑过不透底 */
+  box-shadow: -10px 0 10px -6px rgba(0, 0, 0, .35);
+}
+#reader-bar .rb-source {
+  background: rgba(0, 0, 0, .22); border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 8px; color: #eef1f8; font-size: 12px; padding: 4px 6px;
+  outline: none; max-width: 104px; cursor: pointer;
+}
+#reader-bar .rb-source:focus { border-color: var(--accent); }
+#reader-bar .rb-source option { color: #1c2333; }
 .rb-zoom { min-width: 52px; font-variant-numeric: tabular-nums; }
 .rb-count { min-width: 38px; text-align: center; font-size: 11.5px; color: #c3c9d6; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .rb-find, .rb-page {
@@ -1030,6 +1067,25 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
 .pp-state.failed { color: var(--danger); border-color: #f3ccd2; background: var(--danger-soft); }
 .pp-state.cancelled { color: var(--warn-text); border-color: var(--warn-border); background: var(--warn-bg); }
 .pp-stop { padding: 2px 9px; font-size: 11.5px; }
+/* 全文翻译迷你进度卡：与 pipeline 面板同一区域，关掉弹窗也能看到进度 */
+.ft-mini {
+  flex: none; display: flex; align-items: center; gap: 9px;
+  margin: 10px 16px 0; padding: 8px 12px;
+  border: 1px solid var(--accent-soft-2); border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--accent-soft), #fff 75%);
+  box-shadow: var(--shadow-xs); cursor: pointer;
+  font-size: 12px; color: var(--accent-hover);
+  animation: card-in .2s var(--ease);
+}
+.ft-mini:hover { border-color: var(--accent); }
+.ft-mini-label { flex: none; font-weight: 700; }
+.ft-mini-track { flex: 1; height: 5px; border-radius: 3px; background: #e3e9f5; overflow: hidden; }
+.ft-mini-fill { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--accent); transition: width .4s ease; }
+.ft-mini-text { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ft-mini.done { border-color: #c9ecd8; }
+.ft-mini.done .ft-mini-fill { background: var(--ok); }
+.ft-mini.err { border-color: #f3ccd2; }
+.ft-mini.err .ft-mini-text { color: var(--danger); }
 .pp-close { padding: 1px 7px; font-size: 12px; }
 .pp-steps { display: flex; flex-direction: column; gap: 3px; }
 .pp-step {
@@ -1064,7 +1120,9 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
   padding: 7px 6px; font-size: 12px; font-weight: 600; color: var(--muted);
   background: transparent; border: 1px solid transparent; border-bottom: none;
   border-radius: 9px 9px 0 0; box-shadow: none; white-space: nowrap;
+  overflow: hidden;                 /* 栏太窄时文字在页签内截断，不溢出压到相邻页签 */
 }
+.art-tab > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .art-tab:hover { background: var(--panel-soft); color: var(--text-soft); transform: none; }
 .art-tab.active {
   background: #fff; color: var(--accent-hover); border-color: var(--border);
@@ -1073,7 +1131,7 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
 .art-tab .art-meta {
   font-size: 10px; font-weight: 600; padding: 0 6px; border-radius: 999px;
   color: var(--muted); background: var(--panel-soft); border: 1px solid var(--border);
-  flex: none;
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;  /* 窄栏里跟着收缩，不顶出页签 */
 }
 .art-tab.active .art-meta { background: var(--accent-soft); border-color: var(--accent-soft-2); color: var(--accent); }
 .art-tab.empty { opacity: .6; }

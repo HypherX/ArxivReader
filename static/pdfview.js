@@ -59,6 +59,8 @@
   }
 
   function close() {
+    flushProgress(true);
+    clearInterval(progressTimer); progressTimer = null;
     state.token += 1;
     queue = []; rendering = 0;
     state.paperId = null;
@@ -72,6 +74,44 @@
     if (box) { box.innerHTML = ""; box.scrollTop = 0; box.scrollLeft = 0; }
   }
 
+  // ---------------------------------------------------------------- 阅读进度上报
+  // maxSeen = 读到过的最远页（只增不减）；readSecs = 本次打开累计的阅读秒数。
+  // 每 5s 记一次账（页面不可见时不计），每 20s 或关闭时上报一次，后端取 max 落库。
+  var progressTimer = null;
+
+  function noteVisiblePages() {
+    var maxSeen = 0;
+    state.pages.forEach(function (p) { if (p.inView && p.no > maxSeen) maxSeen = p.no; });
+    if (maxSeen > (state.maxSeen || 0)) state.maxSeen = maxSeen;
+  }
+
+  function tickProgress() {
+    if (!state.paperId || !state.pages.length) return;
+    if (document.visibilityState !== "visible") { state.tickAt = Date.now(); return; }
+    var now = Date.now();
+    state.readSecs = (state.readSecs || 0) + Math.min(30, Math.round((now - (state.tickAt || now)) / 1000));
+    state.tickAt = now;
+    // 时长攒够 20s、或最远页推进了 3 页以上，就上报一次
+    if (state.readSecs - (state.reportedSecs || 0) >= 20 ||
+        (state.maxSeen || 0) - (state.reportedPage || 0) >= 3) flushProgress(false);
+  }
+
+  function flushProgress(final) {
+    if (!state.paperId) return;
+    var secs = (state.readSecs || 0) - (state.reportedSecs || 0);
+    var page = state.maxSeen || 0;
+    if (!page && secs <= 0) return;
+    var payload = { paperId: state.paperId, page: page, pages: state.pages.length,
+                    seconds: Math.max(0, secs) };
+    state.reportedSecs = state.readSecs;   // 乐观记账；失败也就丢一小段，可接受
+    state.reportedPage = state.maxSeen;
+    fetch("/api/papers/" + payload.paperId + "/reading-progress", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page: payload.page, pages: payload.pages, seconds: payload.seconds }),
+      keepalive: true,
+    }).catch(function () {});
+  }
+
   function open(paper, opts) {
     var box = scrollBox();
     if (!box) return Promise.resolve();
@@ -81,6 +121,11 @@
     // 默认打开原始 PDF；传入 opts.url 可打开全文翻译产物（对照版 / 译文版）
     state.url = (opts && opts.url) || ("/api/papers/" + paper.id + "/pdf");
     state.scale = 1; state.rotation = 0; state.fitted = true;
+    // 阅读进度从零记起；恢复上次读到的页（仅原始 PDF，翻译产物的分页不同）
+    state.maxSeen = 0; state.readSecs = 0; state.reportedSecs = 0; state.reportedPage = 0; state.tickAt = Date.now();
+    clearInterval(progressTimer);
+    progressTimer = setInterval(tickProgress, 5000);
+    var restorePage = (!opts || !opts.url) && paper.read_page > 1 ? paper.read_page : 0;
     box.innerHTML = "";
     box.appendChild(node("div", { class: "pv-status", text: global.I18n.t("ui.9aed1d2f4cea") }));
     return loadPdfJs().then(function (lib) {
@@ -94,7 +139,9 @@
     }).then(function (doc) {
       if (token !== state.token) { doc.destroy(); return; }   // 加载期间已切走
       state.doc = doc;
-      return buildDocument(doc, token);
+      return buildDocument(doc, token).then(function () {
+        if (token === state.token && restorePage > 1) gotoPage(restorePage);
+      });
     }).catch(function (error) {
       if (token !== state.token) return;
       state.paperId = null;
@@ -216,6 +263,7 @@
       // 而旧 canvas 还停在原来的尺寸，白底就从右边和下边露成一整片空白。
       if (near && !p.rendered && !p.queued && !p.task) renderPage(p);
     });
+    noteVisiblePages();
     pumpQueue();
   }
 

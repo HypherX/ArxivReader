@@ -65,8 +65,14 @@
 <button class="mini pane-hide" data-hide="list" data-i18n-title="ui.578799945054" title="隐藏此栏">«</button>
 </div>
 <nav aria-label="当前目录" data-i18n="ui.c4fb397688ed" data-i18n-aria-label="ui.257f4442af73" id="folder-breadcrumb">全部论文</nav>
-<div class="folder-scope hidden" id="folder-scope"><label><input id="only-current" type="checkbox"/><span data-i18n="ui.ddb1f51e0dd0">仅当前层</span></label><button class="mini" data-i18n="ui.89629f66e026" id="folder-review">生成综述</button></div>
+<div class="folder-scope hidden" id="folder-scope"><label><input id="only-current" type="checkbox"/><span data-i18n="ui.ddb1f51e0dd0">仅当前层</span></label><button class="mini" data-i18n="ui.89629f66e026" id="folder-review">生成综述</button><button class="mini hidden" data-i18n="ui.b7f3e8a1c206" data-i18n-title="ui.b7f3e8a1c220" id="folder-classify" title="用 LLM 把当前层论文按主题自动分进子文件夹">🧩 自动分小类</button></div>
 <input autocomplete="off" data-i18n-placeholder="ui.979f5b6b497e" id="search" placeholder="搜索标题 / 摘要 / 作者…" type="text"/>
+<div class="list-tools"><select aria-label="排序方式" data-i18n-aria-label="ui.b7f3e8a1c200" id="paper-sort">
+<option data-i18n="ui.b7f3e8a1c216" value="added_desc">添加时间（新→旧）</option>
+<option data-i18n="ui.b7f3e8a1c217" value="added_asc">添加时间（旧→新）</option>
+<option data-i18n="ui.b7f3e8a1c218" value="title">标题 A→Z</option>
+<option data-i18n="ui.b7f3e8a1c219" value="progress">阅读进度（未读优先）</option>
+</select></div>
 <div id="paper-list"></div>
 </div>
 <div class="resizer" data-for="list" data-i18n-title="ui.4936962c407a" id="rz-list" title="拖拽调整宽度"></div>
@@ -110,7 +116,7 @@
 <span class="rb-count" id="pdfv-find-count"></span>
 </span>
 <span class="spacer"></span>
-<span class="rb-group">
+<span class="rb-group rb-tail">
 <select aria-label="PDF 版本" class="rb-source hidden" data-i18n-aria-label="ui.67a27e2ee51e" data-i18n-title="ui.67a27e2ee51e" id="pdf-source" title="切换 PDF 版本"></select>
 <button class="mini" data-i18n="ui.80461c2decc5" data-i18n-title="ui.dcf2f068701e" id="tp-toggle" title="显示或隐藏译文栏">译文</button>
 </span>
@@ -181,9 +187,14 @@
 <button class="ai-act" data-i18n-title="ui.d4a30c3280c0" data-step="graph" id="ai-graph" title="论文关系：需要已有深度精读和分类，再抽取与同方向论文的关系"><span class="aa-icon">🕸</span><span class="aa-name" data-i18n="ui.6f5e4d3c2b1a">论文关系</span><span class="aa-state"></span></button>
 </div>
 <div class="pipeline-panel hidden" id="pipeline-panel"></div>
+<div class="ft-mini hidden" id="ft-mini" data-i18n-title="ui.b7f3e8a1c221" role="button" tabindex="0" title="点击查看翻译详情">
+<span class="ft-mini-label" data-i18n="ui.010b35dc54d3">🌐 全文翻译</span>
+<span class="ft-mini-track"><span class="ft-mini-fill" id="ft-mini-bar"></span></span>
+<span class="ft-mini-text" id="ft-mini-text"></span>
+</div>
 <!-- 阅读产物：对话 / 快速总结 / 深度精读 三个页签（产物由知识网络 pipeline 生成） -->
 <div class="artifact-tabs" id="artifact-tabs">
-<button class="art-tab active" data-i18n="ui.db62e99b6396" data-i18n-title="ui.3b12e640213a" data-view="chat" title="与论文对话">💬 对话</button>
+<button class="art-tab active" data-i18n-title="ui.3b12e640213a" data-view="chat" title="与论文对话"><span data-i18n="ui.db62e99b6396">💬 对话</span></button>
 <button class="art-tab" data-i18n-title="ui.a047223da884" data-view="summary" title="快速总结：洞察、贡献、结论（含“解决了什么 / 未来展望”）"><span data-i18n="ui.a09e7472cd41">🧾 快速总结</span><span class="art-meta"></span></button>
 <button class="art-tab" data-i18n-title="ui.cebb24bde301" data-view="deep_reading" title="深度精读：论文背景、详细方法、详细实验、Insight 与价值、不足与未来展望"><span data-i18n="ui.ce4541f9f7b8">📖 深度精读</span><span class="art-meta"></span></button>
 </div>

@@ -140,6 +140,37 @@
     el("ft-cancel").classList.toggle("hidden", !running);
     if (task.status === "failed") showError(t("ui.7720ed5fffa8") + (task.error || ""));
     if (task.status === "done") renderResult(task);
+    renderMini(task, statusText);
+  }
+
+  // ---------------- 对话区迷你进度卡：关掉弹窗后进度仍可见，点击回到弹窗 ----------------
+  var miniTimer = null;
+
+  function renderMini(task, statusText) {
+    var box = el("ft-mini");
+    if (!box) return;
+    var paper = state.getPaper && state.getPaper();
+    var terminal = task && task.status !== "running" && task.status !== "queued";
+    // 别的论文的任务、或已完成且过了展示期：收起
+    if (!task || !paper || task.paper_id !== paper.id ||
+        (terminal && box.dataset.until && Date.now() > Number(box.dataset.until))) {
+      box.classList.add("hidden");
+      return;
+    }
+    box.classList.remove("hidden");
+    box.classList.toggle("done", task.status === "done");
+    box.classList.toggle("err", task.status === "failed" || task.status === "cancelled" || task.status === "interrupted");
+    el("ft-mini-bar").style.width = (task.progress || 0) + "%";
+    el("ft-mini-text").textContent =
+      (statusText || task.status) + (task.progress && !terminal ? " · " + task.progress + "%" : "");
+    clearTimeout(miniTimer);
+    if (terminal) {
+      // 完成/失败状态停 10 秒自动收起，不一直占着对话区
+      box.dataset.until = String(Date.now() + 10000);
+      miniTimer = setTimeout(function () { box.classList.add("hidden"); }, 10000);
+    } else {
+      delete box.dataset.until;
+    }
   }
 
   function pollTask(taskId) {
@@ -251,9 +282,13 @@
       var current = state.getPaper();
       if (!current || current.id !== paper.id) return;
       fillSwitcher(view);
-      // 有在跑的任务：下次打开弹窗时接着展示进度
+      // 有在跑的任务：接上轮询，对话区迷你进度卡同步可见（不用打开弹窗）
       if (view.latest && (view.latest.status === "running" || view.latest.status === "queued")) {
         state.task = view.latest;
+        renderMini(view.latest);
+        pollTask(view.latest.id);
+      } else {
+        renderMini(null);
       }
     }).catch(function () {});
   }
@@ -470,6 +505,13 @@
       if (btn) btn.click();
     });
     el("ft-output").addEventListener("change", syncDualModeVisibility);
+    var mini = el("ft-mini");
+    if (mini) {
+      mini.addEventListener("click", openModal);
+      mini.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openModal(); }
+      });
+    }
     el("pdf-source").addEventListener("change", onSwitcherChange);
     initSettings();
   }
