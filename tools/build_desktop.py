@@ -12,7 +12,9 @@ import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "1.1.1"
+# 版本号单一来源在 app/version.py；打包脚本只读不改
+VERSION = re.search(r'VERSION\s*=\s*"([^"]+)"',
+                    (ROOT / "app" / "version.py").read_text(encoding="utf-8")).group(1)
 
 
 def resources(output):

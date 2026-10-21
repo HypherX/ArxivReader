@@ -38,6 +38,15 @@
 <button class="ghost" data-i18n="ui.df3d58c7d84b" id="open-settings">设置</button>
 </div>
 </header>
+<!-- 应用更新横幅：发现新版本时出现，下载中显示进度，完成后引导重启换包 -->
+<div class="update-banner hidden" id="update-banner">
+<span class="ub-ico">⬆</span>
+<span class="ub-text" id="ub-text"></span>
+<span class="ub-progress hidden" id="ub-progress"><span class="ub-bar"><span class="ub-fill" id="ub-fill"></span></span><span class="ub-pct" id="ub-pct"></span></span>
+<a class="ub-link hidden" href="#" id="ub-notes" rel="noopener" target="_blank" data-i18n="update.notes">查看说明</a>
+<button class="mini primary" data-i18n="update.now" id="ub-action">立即更新</button>
+<button class="mini" data-i18n="update.later" data-i18n-title="update.later_title" id="ub-later" title="此版本不再提醒">稍后</button>
+</div>
 <div class="toast hidden" id="toast"></div>
 <!-- 三/四栏主体（含可拖拽分隔条） -->
 <main id="layout">
@@ -319,6 +328,16 @@
 </div>
 </details>
 <p class="hint" data-i18n="ui.5c3eddea3976">测试连接会发送一次模型请求，可能计费；不会自动保存设置。</p>
+<details class="settings-module" id="update-section"><summary data-i18n="update.section">应用更新</summary>
+<div class="module-body">
+<div class="row" style="align-items:center;flex-wrap:wrap;gap:10px">
+<span class="hint" id="upd-current"></span>
+<label style="flex-direction:row;align-items:center;gap:6px"><input id="upd-auto" type="checkbox"/><span data-i18n="update.auto">启动时自动检查更新</span></label>
+<button class="ghost" data-i18n="update.check_now" id="upd-check">检查更新</button>
+</div>
+<div class="hint" id="upd-result"></div>
+</div>
+</details>
 <div class="hidden" id="desktop-storage"><p class="hint" id="storage-path"></p><button class="ghost" data-i18n="ui.f2ec38914b2d" id="storage-open">打开资料目录</button><button class="ghost" data-i18n="ui.ae4217e96d7d" id="storage-select">选择已有资料库</button><p class="hint" data-i18n="ui.ab12b2196651">切换资料库将在下次启动生效，不移动或删除原有资料。</p></div>
 <div class="hint" id="settings-test-result"></div>
 </div>

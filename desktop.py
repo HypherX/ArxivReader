@@ -13,7 +13,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
-VERSION = "1.1.1"
+from app.version import VERSION
 
 
 def _backend(pipe, data_dir, ticket, cookie):
@@ -234,6 +234,9 @@ class _Bridge:
                                                        width=980, height=820, min_size=(640, 480))
             elif action == "focus_main":
                 ctx["main"].restore(); ctx["main"].show()
+            elif action == "quit_app":
+                # 自更新换包脚本已在后台等本进程退出；销毁主窗口即走正常关机流程
+                self._window.destroy()
             elif action == "open_external":
                 external(str(payload.get("url", "")), ctx["origin"])
             else:

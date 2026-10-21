@@ -36,8 +36,12 @@
     if (available()) return call("open_reader", { path: path });
     global.open(path, "_blank", "noopener"); return Promise.resolve();
   }
+  function quit() {
+    if (available()) return call("quit_app");
+    return Promise.reject(new Error(I18n.t("update.dev_mode")));
+  }
   global.Desktop = { available: available, saveMarkdown: saveMarkdown, copy: copy,
-    storageInfo: storageInfo, openReader: openReader };
+    storageInfo: storageInfo, openReader: openReader, quit: quit };
   function bindStorage() {
     storageInfo().catch(function () {});
     var open = document.getElementById("storage-open"), select = document.getElementById("storage-select");

@@ -2527,6 +2527,7 @@
       $("set-timeout").value = s.request_timeout;
       $("set-retries").value = s.max_retries;
       if (window.Desktop) window.Desktop.storageInfo();
+      Update.check(false).then(Update.fillSettings);
       $("set-api-key").value = "";
       I18n.bind($("key-hint"), function () { return s.has_api_key ? (I18n.t("ui.a49a423c7014") + s.api_key_preview) : I18n.t("ui.080d8395d826"); });
       // 划词翻译自定义端点（seltr.*；留空 = 跟随主设置）
@@ -3414,8 +3415,152 @@
   }
 
   // ---------------- 启动 ----------------
+  // 应用更新：启动检查（桌面端、可在设置里关）、横幅提示、后台下载、重启换包
+  var Update = (function () {
+    var pollTimer = null, lastStatus = null, toastedAt = 0;
+
+    function banner() { return $("update-banner"); }
+    function fmtMB(n) { return (n / 1048576).toFixed(1); }
+    function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+    function hideBanner() { banner().classList.add("hidden"); stopPoll(); }
+
+    function render(status) {
+      lastStatus = status;
+      if (!status || !status.ok) { hideBanner(); return; }
+      var dl = status.download;
+      var downloading = !!(dl && dl.state === "running");
+      var downloaded = !!(dl && dl.state === "done");
+      var failed = !!(dl && dl.state === "failed");
+      // 有新版本（未被"稍后"忽略）或存在下载任务时才显示横幅
+      if ((!status.has_update || status.dismissed) && !downloading && !downloaded && !failed) { hideBanner(); return; }
+      if (failed && dl.started_at === toastedAt) { hideBanner(); return; }
+
+      var version = status.latest || "";
+      banner().classList.remove("hidden");
+      I18n.bind($("ub-text"), downloading
+        ? function () { return I18n.t("update.downloading", { version: version }); }
+        : downloaded
+          ? function () { return I18n.t("update.done_title") + " · v" + version; }
+          : function () { return I18n.t("update.found", { version: version, current: status.current }); });
+
+      var prog = $("ub-progress");
+      prog.classList.toggle("hidden", !downloading && !downloaded);
+      if (dl && dl.size) {
+        $("ub-fill").style.width = Math.min(100, Math.round(dl.downloaded / dl.size * 100)) + "%";
+        I18n.write($("ub-pct"), I18n.t("update.downloaded_mb", { done: fmtMB(dl.downloaded), total: fmtMB(dl.size) }));
+      } else if (downloading) {
+        $("ub-fill").style.width = "0";
+        I18n.write($("ub-pct"), fmtMB(dl ? dl.downloaded : 0) + " MB");
+      } else if (downloaded) {
+        $("ub-fill").style.width = "100%"; I18n.write($("ub-pct"), "");
+      }
+
+      var notes = $("ub-notes");
+      notes.classList.toggle("hidden", !status.page_url);
+      if (status.page_url) notes.href = status.page_url;
+
+      I18n.bind($("ub-action"), downloaded
+        ? function () { return I18n.t("update.restart_now"); }
+        : function () { return I18n.t("update.now"); });
+      $("ub-action").disabled = downloading;
+      $("ub-later").classList.toggle("hidden", downloading || downloaded);
+
+      if (failed) {
+        stopPoll();
+        toastedAt = dl.started_at || 1;
+        hideBanner();
+        toast(function () { return I18n.t(dl.error || "update.download_failed"); }, "err");
+      }
+    }
+
+    function check(manual) {
+      return api.get("/api/update/check" + (manual ? "?force=1" : "")).then(function (status) {
+        render(status);
+        if (manual) {
+          if (!status.ok) toast(function () { return I18n.t("update.check_failed"); }, "err");
+          else if (!status.has_update) toast(function () { return I18n.t("update.up_to_date", { version: status.current }); }, "ok");
+        }
+        return status;
+      }).catch(function () {
+        if (manual) toast(function () { return I18n.t("update.check_failed"); }, "err");
+        return null;
+      });
+    }
+
+    function startDownload() {
+      api.post("/api/update/download").then(function () {
+        stopPoll();
+        pollTimer = setInterval(function () {
+          api.get("/api/update/download").then(function (dl) {
+            var status = lastStatus || {};
+            status.download = dl;
+            render(status);
+            if (dl.state !== "running") stopPoll();
+          });
+        }, 1000);
+      }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+    }
+
+    function applyAndQuit() {
+      var status = lastStatus || {};
+      askConfirm(I18n.t("update.done_title"),
+                 [I18n.t("update.done_line", { version: status.latest || "" })],
+                 { okText: I18n.t("update.restart_now") }).then(function (yes) {
+        if (!yes) return;
+        api.post("/api/update/apply").then(function () {
+          I18n.bind($("ub-text"), function () { return I18n.t("update.restarting"); });
+          if (window.Desktop && Desktop.available()) {
+            Desktop.quit().catch(function (e) { toast(function () { return e.message; }, "err"); });
+          }
+        }).catch(function (e) { toast(function () { return e.message; }, "err"); });
+      });
+    }
+
+    function bind() {
+      $("ub-action").addEventListener("click", function () {
+        var dl = (lastStatus || {}).download;
+        if (dl && dl.state === "done") applyAndQuit(); else startDownload();
+      });
+      $("ub-later").addEventListener("click", function () {
+        if (lastStatus && lastStatus.latest) api.post("/api/update/dismiss", { version: lastStatus.latest }).catch(function () {});
+        hideBanner();
+      });
+      $("upd-check").addEventListener("click", function () { check(true).then(fillSettings); });
+      $("upd-auto").addEventListener("change", function () {
+        api.post("/api/update/preferences", { auto: $("upd-auto").checked }).catch(function () {});
+      });
+    }
+
+    function fillSettings(status) {
+      status = status || lastStatus;
+      if (!status) return;
+      $("upd-auto").checked = status.auto !== false;
+      I18n.bind($("upd-current"), function () {
+        return I18n.t("update.current", { version: status.current || "?" }) +
+          (status.latest ? I18n.t("update.latest_is", { version: status.latest }) : "");
+      });
+      I18n.bind($("upd-result"), function () {
+        if (!status.ok) return I18n.t("update.check_failed");
+        return status.has_update ? I18n.t("update.found", { version: status.latest, current: status.current })
+                                 : I18n.t("update.up_to_date", { version: status.current });
+      });
+    }
+
+    function startup() {
+      if (!window.Desktop || !Desktop.available()) return;   // 浏览器/开发模式不弹横幅
+      api.get("/api/update/preferences").then(function (prefs) {
+        if (prefs && prefs.auto === false) return;         // 用户关掉了自动检查：完全不请求
+        check(false);
+      }).catch(function () {});
+    }
+    return { startup: startup, bind: bind, check: check, fillSettings: fillSettings };
+  })();
+  window.AppUpdate = Update;   // 供控制台调试与设置页使用
+
   function init() {
     bind();
+    Update.bind();
+    Update.startup();
     fillSessionSelect([]);
     window.addEventListener("reader-language", function (event) {
       if (state.outputLanguage !== event.detail) applyLanguage(event.detail);
