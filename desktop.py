@@ -13,7 +13,7 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 
-VERSION = "1.0.2"
+VERSION = "1.1.1"
 
 
 def _backend(pipe, data_dir, ticket, cookie):
