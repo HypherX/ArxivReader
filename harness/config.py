@@ -26,8 +26,8 @@ _DEFAULT_HARNESS: Dict[str, Any] = {
     "skill_context_tokens": 40000,
     "quick_context_tokens": 3000,
     "chat_context_tokens": 24000,
-    "chat_tools": False,
-    "max_tool_rounds": 0,
+    "chat_tools": True,
+    "max_tool_rounds": 4,
     "output_language": "zh",
 }
 

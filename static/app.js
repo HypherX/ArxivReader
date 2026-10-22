@@ -2062,6 +2062,13 @@
     if (isFollowView()) return loadFollowThread(artifactView);
     return loadChatMessages();
   }
+  function toolChip(t) {
+    // agent 工具调用记录的小芯片：✓/✕ + 工具名，流式过程和持久化渲染共用
+    return el("span", { class: "tool-chip " + (t.ok ? "ok" : "err"), title: t.name }, [
+      el("span", { class: "tc-ico", text: t.ok ? "✓" : "✕" }),
+      el("span", { class: "tc-name", text: function () { return I18n.t("tool." + t.name); } }),
+    ]);
+  }
   function renderMessages(msgs, box, follow) {
     if (follow) {
       if (isFollowView()) state.messages = msgs || [];
@@ -2085,6 +2092,11 @@
     var lastId = visible[visible.length - 1].id;
     visible.forEach(function (m) {
       var node = el("div", { class: "msg " + m.role });
+      var tools = [];
+      if (m.role === "assistant" && m.tools_json) {
+        try { tools = JSON.parse(m.tools_json) || []; } catch (e) { tools = []; }
+      }
+      if (tools.length) node.appendChild(el("div", { class: "msg-tools" }, tools.map(toolChip)));
       var body = el("div", { class: "msg-body" });
       setMd(body, m.content);
       node.appendChild(body);
@@ -2174,7 +2186,7 @@
     var paperId = ctx.paperId || (state.currentPaper && state.currentPaper.id);
     var followKind = ctx.followKind != null ? ctx.followKind : (isFollowView() ? artifactView : "");
     var sessionId = ctx.sessionId || activeSessionId();
-    var ui = { ai: null, answer: null, reasonBlock: null, raw: "", rawReasoning: "" };
+    var ui = { ai: null, answer: null, reasonBlock: null, raw: "", rawReasoning: "", tools: null, toolChips: {} };
     function visible() { return chatStreamVisible(paperId, sessionId, followKind); }
     function ensure() {
       if (!visible()) return false;
@@ -2234,6 +2246,18 @@
         if (nearBottom) requestAnimationFrame(function () { scroller.scrollTop = scroller.scrollHeight; });
       },
       onDone: function () { finish(false); },
+      onTool: function (t) {
+        // agent 工具调用过程：每条完成一个就挂一个 chip，让联网检索等动作可见
+        if (!ensure()) return;
+        if (!ui.tools) {
+          ui.tools = el("div", { class: "msg-tools" });
+          ui.ai.insertBefore(ui.tools, ui.answer);
+        }
+        ui.tools.appendChild(toolChip(t));
+        var box = followKind ? $("follow-messages") : $("messages");
+        var scroller = threadScroller(box);
+        requestAnimationFrame(function () { scroller.scrollTop = scroller.scrollHeight; });
+      },
       onCancelled: function () { finish(true); },
       onAborted: function () { finish(true); },
       onError: function (errMsg) {

@@ -47,6 +47,8 @@ class Tool:
     handler: Callable[..., str]
     max_result_chars: int = MAX_RESULT_CHARS
     output_language: str = "zh"
+    # 没有论文正文时是否暴露该工具：库内检索 / 联网类工具不依赖当前 PDF，置 False
+    needs_document: bool = True
 
     def text(self, zh: str, en: str) -> str:
         return choose({"output_language": self.output_language}, zh, en)
@@ -114,10 +116,9 @@ def tool_names() -> List[str]:
 def build_tools(ctx: ToolContext, names: Optional[List[str]] = None) -> List[Tool]:
     """按名构建工具；未注册的名字直接跳过（技能声明与实现解耦，向后兼容）。
 
-    无正文（抽取失败）时不暴露任何工具：此时工具只会浪费 schema token。
+    无正文（抽取失败）时只隐藏声明了 needs_document 的工具（如本文内定位）；
+    联网检索、库内检索这类不依赖当前 PDF 的工具照常可用。
     """
-    if not ctx.has_document:
-        return []
     out: List[Tool] = []
     for name in (names if names is not None else tool_names()):
         factory = _FACTORIES.get(name)
@@ -125,6 +126,8 @@ def build_tools(ctx: ToolContext, names: Optional[List[str]] = None) -> List[Too
             logger.warning("技能声明了未注册的工具：%s", name)
             continue
         tool = factory(ctx)
+        if tool.needs_document and not ctx.has_document:
+            continue
         tool.output_language = ctx.output_language
         out.append(tool)
     return out
