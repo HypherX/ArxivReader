@@ -267,8 +267,8 @@ def mark_reading(paper_id: int, body: schemas.ReadingMarkIn,
         paper.read_page = total
         paper.last_read_at = datetime.datetime.utcnow()
     else:
+        # 标回未读只回退页码进度；累计阅读时长是历史事实，不跟着清零
         paper.read_page = 0
-        paper.read_seconds = 0
         paper.last_read_at = None
     db.commit()
     db.refresh(paper)

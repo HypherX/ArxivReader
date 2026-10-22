@@ -92,16 +92,24 @@
   // ---------------------------------------------------------------- 选区动作条
   function closeChip() { if (chip) { chip.remove(); chip = null; } }
 
-  function openChip(text, rect) {
+  function openChip(picked, rect) {
     closeChip();
     chip = node("div", { class: "tr-chip" }, [
       node("button", { class: "tr-btn", type: "button", text: t("ui.a52a08335185") }),
+      node("button", { class: "tr-btn", type: "button", text: t("ui.c3f4a1b2d501") }),
       node("button", { class: "tr-btn ghost", type: "button", text: t("ui.63d90d977348") }),
     ]);
     document.body.appendChild(chip);
     var buttons = chip.querySelectorAll("button");
-    buttons[0].addEventListener("click", function () { closeChip(); translate(text); });
-    buttons[1].addEventListener("click", function () { global.Desktop.copy(text); closeChip(); });
+    buttons[0].addEventListener("click", function () { closeChip(); translate(picked.text); });
+    // 选中内容挂到对话框上方的引用区，随下一条提问一起发给模型（app.js 监听这个事件）
+    buttons[1].addEventListener("click", function () {
+      document.dispatchEvent(new CustomEvent("arxivreader:quote-to-chat", {
+        detail: { text: picked.text, pages: picked.pages || [] },
+      }));
+      closeChip();
+    });
+    buttons[2].addEventListener("click", function () { global.Desktop.copy(picked.text); closeChip(); });
     var box = chip.getBoundingClientRect();
     chip.style.left = Math.max(8, Math.min(innerWidth - box.width - 8, rect.x - box.width / 2)) + "px";
     chip.style.top = (rect.top - box.height - 8 > 8 ? rect.top - box.height - 8 : rect.bottom + 8) + "px";
@@ -116,13 +124,18 @@
       // 让浏览器先把选区定下来，否则拖拽最后一格还在移动时读到的是旧选区
       setTimeout(function () {
         var selection = global.getSelection ? global.getSelection() : null;
-        var text = String((selection && selection.toString()) || "").replace(/\s+/g, " ").trim();
-        if (text.length < 2) { closeChip(); return; }
-        if (!selection.rangeCount || !container.contains(selection.getRangeAt(0).commonAncestorContainer)) {
+        if (!selection || !selection.rangeCount || selection.isCollapsed) { closeChip(); return; }
+        if (!container.contains(selection.getRangeAt(0).commonAncestorContainer)) {
           closeChip(); return;
         }
+        // 复制 / 翻译 / 引用统一走几何重建：避开 PDF 里埋的微型水印字，行尾也不会粘连
+        var picked = global.SelectionText
+          ? global.SelectionText.fromSelection(container)
+          : { text: String(selection.toString() || ""), pages: [] };
+        var text = picked.text.trim();
+        if (text.length < 2) { closeChip(); return; }
         var rect = selection.getRangeAt(0).getBoundingClientRect();
-        openChip(text, { x: rect.left + rect.width / 2, y: rect.top, bottom: rect.bottom });
+        openChip({ text: text, pages: picked.pages }, { x: rect.left + rect.width / 2, y: rect.top, bottom: rect.bottom });
       }, 0);
     }, true);
   }
