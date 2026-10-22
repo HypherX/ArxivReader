@@ -125,6 +125,7 @@ class MessageOut(BaseModel):
     role: str
     content: str
     reasoning_content: str = ""
+    tools_json: str = "[]"
 
 
 class ChatRequest(BaseModel):

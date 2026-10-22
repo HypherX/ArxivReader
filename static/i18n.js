@@ -727,7 +727,13 @@
     "update.bad_sha256": ["下载的安装包校验失败，请重试", "Downloaded package failed verification; try again"],
     "update.download_failed": ["下载失败，请检查网络后重试", "Download failed; check your network and try again"],
     "update.not_downloaded": ["还没有完成下载", "No finished download yet"],
-    "update.no_bundle": ["没有识别到应用包位置，请手动更新", "App bundle not recognized; update manually"]
+    "update.no_bundle": ["没有识别到应用包位置，请手动更新", "App bundle not recognized; update manually"],
+    "tool.search_arxiv": ["检索 arXiv", "Search arXiv"],
+    "tool.get_arxiv_paper": ["查证 arXiv 论文", "Look up arXiv paper"],
+    "tool.fetch_web_page": ["抓取网页", "Fetch web page"],
+    "tool.search_library": ["检索本地文库", "Search library"],
+    "tool.related_papers": ["查看关联论文", "Related papers"],
+    "tool.find_in_paper": ["在本文中定位", "Find in this paper"]
   };
   Object.keys(extra).forEach(function (key) { MESSAGES[key] = extra[key]; });
   var language = "zh", bindings = new Map(), channel;

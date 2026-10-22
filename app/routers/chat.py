@@ -2,7 +2,10 @@
 
 Agent Harness 接线（本层不含任何 prompt 拼接）：
   - 规则 prompt、论文材料、历史裁剪都由 harness.chat 装配；
-  - 不向模型提供工具。对话、快速总结追问、深度精读追问各用自己的会话，历史不交叉。
+  - 普通对话窗口（chat）开放 agent 工具（arXiv 检索 / 网页抓取 / 库内检索 /
+    关联图谱 / 本文定位），模型按需调用并在流里下发 tool 帧；
+  - 快速总结 / 深度精读的追问窗口不传工具（它们的 prompt 约定只依据论文全文
+    与该份产物回答）。三个窗口各用自己的会话，历史不交叉。
 
 SSE 帧统一为 `data: {json}\n\n`，json 内 type ∈ {delta, tool, error, cancelled, done}：
   delta     : {"text": 增量正文, "reasoning": 增量推理内容}   # 推理模型下两者都有
@@ -34,6 +37,7 @@ from harness.cancel import Cancelled
 from harness.language import choose
 
 from .. import database, schemas, settings_store
+from .. import chat_tools as _chat_tools  # noqa: F401  导入即注册对话工具集
 from ..models import ChatMessage, ChatSession, Paper
 from knowledge import store as knowledge_store
 
@@ -74,8 +78,13 @@ def _sse(payload: Dict[str, Any]) -> str:
 
 
 def _save_assistant_message(session_id: int, full_text: str, reasoning: str = "", message_id=None,
-                            generation: Optional[int] = None):
-    """用独立会话保存助手回复（流式场景下不依赖请求级会话）。"""
+                            generation: Optional[int] = None,
+                            tools: Optional[List[Dict[str, Any]]] = None):
+    """用独立会话保存助手回复（流式场景下不依赖请求级会话）。
+
+    tools：本轮已完成的工具调用账本；None 表示不改动已有记录（中间帧），
+    传入列表（含空列表）则覆盖写入（最终/终止帧）。
+    """
     if not full_text and not reasoning:
         return None
     if generation is not None and not _is_current(session_id, generation):
@@ -93,6 +102,8 @@ def _save_assistant_message(session_id: int, full_text: str, reasoning: str = ""
                 db.add(msg)
             msg.content = full_text
             msg.reasoning_content = reasoning or ""
+            if tools is not None:
+                msg.tools_json = json.dumps(tools, ensure_ascii=False)
             db.commit()
             db.refresh(msg)
             return msg.id
@@ -116,6 +127,7 @@ def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
     """
     collected: List[str] = []
     reasoning_collected: List[str] = []
+    tool_records: List[Dict[str, Any]] = []
     message_id, complete = None, False
     cfg = {"output_language": settings.output_language}
     interrupted_note = choose(cfg, "\n\n> ⏹ 本次回复已被终止或连接中断", "\n\n> ⏹ Reply stopped or connection interrupted")
@@ -139,6 +151,8 @@ def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
                                                          "".join(reasoning_collected), message_id, generation)
                     yield _sse({"type": "delta", "text": content, "reasoning": reasoning})
             elif kind == "tool":
+                tool_records.append({"name": event.get("name", ""), "ok": bool(event.get("ok")),
+                                     "result_chars": int(event.get("result_chars") or 0)})
                 yield _sse({"type": "tool", "name": event.get("name", ""),
                             "ok": bool(event.get("ok")), "result_chars": event.get("result_chars", 0)})
             elif kind == "error":
@@ -148,7 +162,8 @@ def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
                 full = (event.get("full_content") or event.get("content") or "".join(collected)).strip()
                 reasoning_full = (event.get("full_reasoning_content")
                                   or "".join(reasoning_collected)).strip()
-                message_id = _save_assistant_message(session_id, full, reasoning_full, message_id, generation)
+                message_id = _save_assistant_message(session_id, full, reasoning_full, message_id, generation,
+                                                     tools=tool_records)
                 complete = True
                 yield _sse({"type": "done", "message_id": message_id, "full_text": full,
                             "reasoning_chars": len(reasoning_full)})
@@ -157,7 +172,7 @@ def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
         partial = "".join(collected).strip()
         reasoning_partial = "".join(reasoning_collected).strip()
         message_id = _save_assistant_message(session_id, partial + interrupted_note if partial or reasoning_partial else "",
-                                             reasoning_partial, message_id, generation)
+                                             reasoning_partial, message_id, generation, tools=tool_records)
         complete = True
         logger.info("对话被用户终止（session=%s，已生成 %d 字）", session_id, len(partial))
         yield _sse({"type": "cancelled", "message_id": message_id,
@@ -169,7 +184,8 @@ def _event_stream(session_id: int, settings: harness_llm.LLMSettings,
         events.close()
         if (generation is None or _is_current(session_id, generation)) and not complete and (collected or reasoning_collected):
             _save_assistant_message(session_id, "".join(collected).strip() + interrupted_note,
-                                    "".join(reasoning_collected).strip(), message_id, generation)
+                                    "".join(reasoning_collected).strip(), message_id, generation,
+                                    tools=tool_records)
 
 
 # ---------------- 会话管理 ----------------
@@ -265,6 +281,7 @@ def _stream_reply(session_id: int, user_message_id: int, token: Optional[str], g
                    for m in session.messages
                    if m.id < user_message_id and m.role in ("user", "assistant")]
         if session.scope in _SCOPE_ARTIFACT:
+            # 追问窗口不开放工具：prompt 约定只依据论文全文与该份产物回答
             artifact = knowledge_store.get_artifact(db, paper.id, _SCOPE_ARTIFACT[session.scope])
             if artifact is None or not (artifact.content_md or "").strip():
                 def _missing_artifact() -> Iterator[str]:
@@ -273,10 +290,12 @@ def _stream_reply(session_id: int, user_message_id: int, token: Optional[str], g
                 return StreamingResponse(_missing_artifact(), media_type="text/event-stream", headers=_SSE_HEADERS)
             messages, _info = harness_chat.build_followup_messages(
                 paper, history, content, artifact.content_md, scope=session.scope, cfg=cfg)
+            tools = []
+            rounds = 0
         else:
             messages, _info = harness_chat.build_chat_messages(paper, history, content, cfg=cfg)
-        tools = harness_chat.build_chat_tools(paper, cfg)
-        rounds = harness_chat.max_tool_rounds(cfg)
+            tools = harness_chat.build_chat_tools(paper, cfg)
+            rounds = harness_chat.max_tool_rounds(cfg)
     finally:
         db.close()
 

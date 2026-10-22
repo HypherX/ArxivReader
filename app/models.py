@@ -207,6 +207,9 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # 推理过程（推理模型才有）：前端折叠展示、复盘用；老数据为空串
     reasoning_content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # 本轮助手回复用到过的工具调用（JSON：[{"name","ok","result_chars"}]），
+    # 前端在回复上方渲染过程 chip；老数据为空数组
+    tools_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_utcnow)
 
     session: Mapped["ChatSession"] = relationship("ChatSession", back_populates="messages")

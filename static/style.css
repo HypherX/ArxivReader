@@ -1309,3 +1309,14 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
 .ub-link.hidden { display: none; }
 .ub-link:hover { text-decoration: underline; }
 .update-banner button { flex: none; }
+
+/* ================= 对话工具调用过程 ================= */
+.msg-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.tool-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+  background: var(--panel-soft); border: 1px solid var(--border); color: var(--muted);
+}
+.tool-chip.ok { color: var(--ok); border-color: #c9ecd8; background: var(--ok-soft); }
+.tool-chip.err { color: var(--warn-text, #b45309); border-color: var(--warn-border, #f0dfc2); background: var(--warn-bg, #fdf6e9); }
+.tool-chip .tc-ico { font-weight: 700; }

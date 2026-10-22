@@ -1,6 +1,11 @@
-"""多轮对话（论文问答）：把整篇 PDF（含附录）放进上下文，由模型直接回答。
+"""多轮对话（论文问答）：整篇 PDF（含附录）进上下文 + agent 工具调用。
 
-不提供工具调用。历史只保留最近 chat_history_messages 条（默认 12）。
+工具策略：
+  - 普通对话窗口（chat）开放工具：联网（arXiv 检索 / 论文查证 / 网页抓取）与
+    库内检索 / 关联图谱 / 本文定位，模型按需调用，最多 max_tool_rounds 轮；
+  - 快速总结 / 深度精读的追问窗口不开放工具（它们的 prompt 约定只依据
+    论文全文与该份产物回答）——由路由层按 scope 决定是否传 tools。
+历史只保留最近 chat_history_messages 条（默认 12）。
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -10,7 +15,7 @@ from . import tokens
 from .language import choose, normalize_language, PROMPT_VERSION
 from .paper import PaperInput
 from .skills.base import SkillSpec, load_prompt, render_prompt
-from .tools import Tool
+from .tools import Tool, ToolContext, build_tools
 
 # 对话不是"一次成型的产物"，因此不进技能注册表（避免出现在 /api/skills 列表里），
 # 但仍以 SkillSpec 声明，保证与技能同样的可配置口径。
@@ -104,9 +109,27 @@ def build_followup_messages(paper: Any, history: List[Dict[str, str]], question:
 
 
 def build_chat_tools(paper: Any, cfg: Optional[Dict[str, Any]] = None) -> List[Tool]:
-    """对话不使用工具。论文内容已经整篇放进上下文。"""
-    return []
+    """对话窗口的 agent 工具：联网检索 / 网页抓取 / 库内检索 / 关联图谱 / 本文定位。
+
+    cfg["chat_tools"]=False 可整体关闭（回到纯全文直读模式）。
+    """
+    cfg = cfg or harness_config.get_harness_config()
+    if cfg.get("chat_tools") is False:
+        return []
+    paper_input = paper if isinstance(paper, PaperInput) else PaperInput.from_any(paper)
+    ctx = ToolContext(paper=paper_input, document=paper_input.document(),
+                      output_language=normalize_language(cfg.get("output_language")))
+    return build_tools(ctx, list(CHAT_TOOL_NAMES))
 
 
 def max_tool_rounds(cfg: Optional[Dict[str, Any]] = None) -> int:
-    return 0
+    cfg = cfg or harness_config.get_harness_config()
+    try:
+        return max(0, int(cfg.get("max_tool_rounds") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+# 对话可用工具名（实现分别在 harness.tools.web 与 app.chat_tools 注册）
+CHAT_TOOL_NAMES = ("search_arxiv", "get_arxiv_paper", "fetch_web_page",
+                   "search_library", "related_papers", "find_in_paper")
