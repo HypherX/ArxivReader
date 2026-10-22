@@ -75,20 +75,59 @@
   }
 
   // ---------------------------------------------------------------- 阅读进度上报
-  // maxSeen = 读到过的最远页（只增不减）；readSecs = 本次打开累计的阅读秒数。
-  // 每 5s 记一次账（页面不可见时不计），每 20s 或关闭时上报一次，后端取 max 落库。
+  // maxSeen = 真正停留过的最远页（只增不减）：页面要在可视区内连续停够 DWELL_MS 才算"看过"，
+  // 快速滚过 / 预渲染边距里的页不计——否则一滚到底就直接 100% "已读完"。
+  // readSecs = 本次打开累计的阅读秒数：只在页面可见、预览栏开着、且用户有操作（90s 内）时计时，
+  // 应用挂在那不动不会再跑表。每 5s 记一次账，每 20s 或关闭时上报一次，后端取 max 落库。
   var progressTimer = null;
+  var DWELL_MS = 1500;               // 一页要在视口内停多久才算"看过"
+  var IDLE_MS = 90000;               // 多久没操作算人不在，停止计时
+  var VIEW_FRACTION = 0.25;          // 页面至少露出多少比例才算正在看
 
-  function noteVisiblePages() {
-    var maxSeen = 0;
-    state.pages.forEach(function (p) { if (p.inView && p.no > maxSeen) maxSeen = p.no; });
-    if (maxSeen > (state.maxSeen || 0)) state.maxSeen = maxSeen;
+  function readerOnScreen() {
+    var box = scrollBox();
+    if (!box || box.offsetParent === null) return false;
+    var rect = box.getBoundingClientRect();
+    return rect.width > 50 && rect.height > 50;
+  }
+
+  function noteActivity() { state.lastActive = Date.now(); }
+
+  function isActive(now) {
+    return document.visibilityState === "visible" && readerOnScreen()
+      && now - (state.lastActive || 0) < IDLE_MS;
+  }
+
+  /** 按真实可视区更新每页停留状态，停够 DWELL_MS 的页标记为 seen，推进 maxSeen。 */
+  function noteDwell(now, active) {
+    if (!state.pages.length) return;
+    var box = scrollBox();
+    var host = box.getBoundingClientRect();
+    var maxSeen = state.maxSeen || 0;
+    state.pages.forEach(function (p) {
+      var visible = false;
+      if (active && p.box.isConnected) {
+        var rect = p.box.getBoundingClientRect();
+        var overlap = Math.min(rect.bottom, host.bottom) - Math.max(rect.top, host.top);
+        visible = overlap > 0 && overlap >= Math.min(rect.height, host.height) * VIEW_FRACTION;
+      }
+      if (visible) {
+        if (!p.visibleSince) p.visibleSince = now;
+        if (!p.seen && now - p.visibleSince >= DWELL_MS) p.seen = true;
+      } else {
+        p.visibleSince = 0;
+      }
+      if (p.seen && p.no > maxSeen) maxSeen = p.no;
+    });
+    state.maxSeen = maxSeen;
   }
 
   function tickProgress() {
     if (!state.paperId || !state.pages.length) return;
-    if (document.visibilityState !== "visible") { state.tickAt = Date.now(); return; }
     var now = Date.now();
+    var active = isActive(now);
+    noteDwell(now, active);
+    if (!active) { state.tickAt = now; return; }
     state.readSecs = (state.readSecs || 0) + Math.min(30, Math.round((now - (state.tickAt || now)) / 1000));
     state.tickAt = now;
     // 时长攒够 20s、或最远页推进了 3 页以上，就上报一次
@@ -109,6 +148,10 @@
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ page: payload.page, pages: payload.pages, seconds: payload.seconds }),
       keepalive: true,
+    }).then(function (resp) {
+      // 上报成功把最新进度交给外层刷新列表（阅读时长 / 完成度立刻可见，不用等重进）
+      if (!resp.ok || typeof state.onProgress !== "function") return null;
+      return resp.json().then(function (paper) { state.onProgress(paper); });
     }).catch(function () {});
   }
 
@@ -123,6 +166,7 @@
     state.scale = 1; state.rotation = 0; state.fitted = true;
     // 阅读进度从零记起；恢复上次读到的页（仅原始 PDF，翻译产物的分页不同）
     state.maxSeen = 0; state.readSecs = 0; state.reportedSecs = 0; state.reportedPage = 0; state.tickAt = Date.now();
+    state.lastActive = Date.now();
     clearInterval(progressTimer);
     progressTimer = setInterval(tickProgress, 5000);
     var restorePage = (!opts || !opts.url) && paper.read_page > 1 ? paper.read_page : 0;
@@ -263,7 +307,7 @@
       // 而旧 canvas 还停在原来的尺寸，白底就从右边和下边露成一整片空白。
       if (near && !p.rendered && !p.queued && !p.task) renderPage(p);
     });
-    noteVisiblePages();
+    noteDwell(Date.now(), isActive(Date.now()));
     pumpQueue();
   }
 
@@ -603,6 +647,17 @@
     if (typeof ResizeObserver !== "undefined") new ResizeObserver(onResize).observe(box);
     else global.addEventListener("resize", onResize);
 
+    // 阅读计时的"人在场"信号：滚动 / 点按 / 键盘 / 移动鼠标都算活动；90s 无操作就停表
+    state.lastActive = Date.now();
+    var moveTick = 0;
+    global.addEventListener("pointermove", function () {
+      var now = Date.now();
+      if (now - moveTick > 500) { moveTick = now; noteActivity(); }
+    }, { passive: true });
+    ["pointerdown", "keydown", "wheel"].forEach(function (name) {
+      global.addEventListener(name, noteActivity, { passive: true });
+    });
+
     el("pdfv-in").addEventListener("click", function () { applyScale(state.scale * 1.2, null, false); });
     el("pdfv-out").addEventListener("click", function () { applyScale(state.scale / 1.2, null, false); });
     el("pdfv-label").addEventListener("click", function () { gotoFit(true); });
@@ -636,5 +691,6 @@
 
   global.PdfView = { open: open, close: close, gotoPage: gotoPage, init: bind,
                      isVisible: function () { return !!state.paperId; },
-                     current: function () { return { paperId: state.paperId, url: state.url }; } };
+                     current: function () { return { paperId: state.paperId, url: state.url }; },
+                     set onProgress(fn) { state.onProgress = fn; } };
 })(window);

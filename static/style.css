@@ -1320,3 +1320,21 @@ button.pane-hide { padding: 1px 7px; font-size: 13px; }
 .tool-chip.ok { color: var(--ok); border-color: #c9ecd8; background: var(--ok-soft); }
 .tool-chip.err { color: var(--warn-text, #b45309); border-color: var(--warn-border, #f0dfc2); background: var(--warn-bg, #fdf6e9); }
 .tool-chip .tc-ico { font-weight: 700; }
+
+/* 选中引用芯片：挂在对话框上方，随下一条提问一起发出 */
+#chat-quotes { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px 0; }
+#chat-quotes.hidden { display: none; padding: 0; }
+.chat-quote {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; padding: 5px 8px; border-radius: 8px;
+  background: var(--panel-soft); border: 1px solid var(--border); color: var(--muted);
+}
+.chat-quote .cq-ico { color: var(--accent); font-size: 13px; flex: none; }
+.chat-quote .cq-text {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-quote .cq-x {
+  flex: none; border: none; background: transparent; color: var(--muted);
+  cursor: pointer; font-size: 12px; padding: 0 2px; border-radius: 4px;
+}
+.chat-quote .cq-x:hover { color: var(--danger, #c0392b); background: rgba(0, 0, 0, .05); }

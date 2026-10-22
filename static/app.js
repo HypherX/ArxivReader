@@ -1715,6 +1715,79 @@
     Translate.init(function () { return state.currentPaper && state.currentPaper.id; });
     Translate.watch($("pdf-scroll"));
     FullTranslate.init(function () { return state.currentPaper; });
+
+    // 阅读进度上报成功：就地更新列表里那一篇的时长 / 完成度，不用等刷新才看到
+    PdfView.onProgress = function (paper) {
+      var item = state.papers.find(function (x) { return x.id === paper.id; });
+      if (!item) return;
+      if (item.read_page === paper.read_page && item.read_pages === paper.read_pages
+          && item.read_seconds === paper.read_seconds) return;
+      Object.assign(item, paper);
+      if (!isFollowView()) renderPapers();
+    };
+    // 复制接管：PDF 文字层里的选区按几何重建文本（seltext.js）——发行方埋的微型水印字
+    // 剔除、行尾不粘连，剪贴板内容和眼睛看到的选区一致。文字层之外（重排模式等）不动。
+    $("pdf-scroll").addEventListener("copy", function (event) {
+      if (!global.SelectionText || !event.clipboardData) return;
+      var sel = document.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+      if (!sel.getRangeAt(0).intersectsNode($("pdf-scroll"))) return;
+      var picked = SelectionText.fromSelection($("pdf-scroll"));
+      if (!picked.text) return;
+      event.clipboardData.setData("text/plain", picked.text);
+      event.preventDefault();
+    });
+
+    // 划词"加入对话"：选区文本变成引用芯片挂在输入框上方，随下一条提问一起发出去
+    document.addEventListener("arxivreader:quote-to-chat", function (event) {
+      var d = (event && event.detail) || {};
+      var text = String(d.text || "").trim();
+      if (!text) return;
+      chatQuotes.push({ text: text, pages: d.pages || [] });
+      renderChatQuotes();
+      // 引用就是为了提问：对话栏关着的话先亮出来，焦点交给输入框
+      var pane = paneEl("chat");
+      if (pane && pane.classList.contains("hidden")) togglePane("chat");
+      var input = $("chat-input");
+      if (input) input.focus();
+    });
+  }
+
+  // ---------------- 选中引用：挂在对话框上方的引用芯片 ----------------
+  var chatQuotes = [];
+
+  function renderChatQuotes() {
+    var box = $("chat-quotes");
+    if (!box) return;
+    replaceChildren(box);
+    box.classList.toggle("hidden", !chatQuotes.length);
+    chatQuotes.forEach(function (q, i) {
+      var label = "";
+      if (q.pages && q.pages.length) {
+        label = "p." + q.pages[0] + (q.pages.length > 1 ? "–" + q.pages[q.pages.length - 1] : "") + " · ";
+      }
+      var preview = q.text.length > 90 ? q.text.slice(0, 90) + "…" : q.text;
+      box.appendChild(el("div", { class: "chat-quote", title: q.text }, [
+        el("span", { class: "cq-ico", text: "❝" }),
+        el("span", { class: "cq-text", text: label + preview }),
+        el("button", { class: "cq-x", type: "button", title: function () { return I18n.t("ui.68e3a1b2d502"); },
+          text: "✕", onclick: function () { chatQuotes.splice(i, 1); renderChatQuotes(); } }),
+      ]));
+    });
+  }
+
+  /** 引用出队：返回拼好引用块的消息正文，并清空引用区。 */
+  function consumeQuotes(content) {
+    if (!chatQuotes.length) return content;
+    var blocks = chatQuotes.map(function (q) {
+      var head = q.pages && q.pages.length
+        ? "> — p." + q.pages[0] + (q.pages.length > 1 ? "–" + q.pages[q.pages.length - 1] : "") + "\n" : "";
+      return head + q.text.split("\n").map(function (line) { return "> " + line; }).join("\n");
+    });
+    chatQuotes.length = 0;
+    renderChatQuotes();
+    var body = content || I18n.t("chat.quote_default");
+    return blocks.join("\n\n") + "\n\n" + body;
   }
 
 
@@ -1767,6 +1840,7 @@
   function renderPapers() {
     var box = $("paper-list");
     if (state.papersLoading) { replaceChildren(box, skeleton("cards", 4)); return; }
+    var keepScroll = box.scrollTop;
     replaceChildren(box);
     if (!state.papers.length) {
       box.appendChild(state.search
@@ -1821,6 +1895,7 @@
       item.addEventListener("click", function () { selectPaper(p); });
       box.appendChild(item);
     });
+    box.scrollTop = keepScroll;   // 后台刷新（阅读进度上报等）重绘时不把列表弹回顶部
   }
   function selectPaper(p) {
     if (!state.currentPaper || state.currentPaper.id !== p.id) {
@@ -2281,13 +2356,15 @@
     if (state.streaming) return;
     var input = $("chat-input");
     var content = input.value.trim();
-    if (!content) return;
+    if (!content && !chatQuotes.length) return;
     if (!state.currentPaper) { toast(function () { return I18n.t("ui.7912dc9e9b8b"); }, "err"); return; }
     var followKind = isFollowView() ? artifactView : "";
     if (followKind && !String(artifactText || "").trim()) {
       toast(function () { return I18n.t("follow.need_artifact"); }, "warn");
       return;
     }
+    // 引用芯片拼进消息正文（> 引用块在前、问题在后），随这条消息一起发出并清空引用区
+    content = consumeQuotes(content);
     var paperId = state.currentPaper.id;
     dropSend[paperId] = false;
     state.streaming = true; setSendButton(true);
