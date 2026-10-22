@@ -156,3 +156,13 @@ ArxivReader 以 [MIT 许可证](LICENSE) 开源，可以自由使用、修改和
 - [DOMPurify](https://github.com/cure53/DOMPurify)
 - [KaTeX](https://github.com/KaTeX/KaTeX)
 - [PDFMathTranslate](https://github.com/PDFMathTranslate/PDFMathTranslate-next)
+
+## ✨ Star History
+
+<a href="https://www.star-history.com/?repos=hypherx%2Farxivreader&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=hypherx/arxivreader&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=hypherx/arxivreader&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=hypherx/arxivreader&type=date&legend=top-left" />
+ </picture>
+</a>
