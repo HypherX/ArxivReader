@@ -4,4 +4,4 @@ desktop.py（桌面入口）、app/main.py（后端）与 tools/build_desktop.py
 都从这里取版本，避免发版时多处手工同步漏改。
 """
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
