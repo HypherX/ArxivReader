@@ -230,20 +230,53 @@
      ["mono", "ui.159c76d7a551", task.has_mono, task.mono_name]].forEach(function (entry) {
       var kind = entry[0], labelKey = entry[1], exists = entry[2], name = entry[3];
       if (!exists) return;
+      var openBtn = node("button", { class: "mini", type: "button", title: t("ui.ade67fee56af"), text: "↗" });
+      var saveBtn = node("button", { class: "mini", type: "button", title: t("ui.f931fe76f0a9"), text: "⬇" });
       var row = node("div", { class: "ft-file-row" }, [
         node("span", { class: "ft-file-name", text: name, title: name }),
         node("button", { class: "mini primary", type: "button", text: t(labelKey) }),
-        node("a", { class: "mini", href: fileUrl(task, kind), target: "_blank",
-                    rel: "noopener", title: t("ui.ade67fee56af"), text: "↗" }),
-        node("a", { class: "mini", href: fileUrl(task, kind), download: name,
-                    title: t("ui.f931fe76f0a9"), text: "⬇" }),
+        openBtn,
+        saveBtn,
       ]);
       row.querySelector("button").addEventListener("click", function () {
         switchSource(kind, task.id);
         closeModal();
       });
+      // 不用 <a download> / target=_blank：桌面壳禁止下载，导航白名单也不包含译文地址，点了没反应。
+      openBtn.addEventListener("click", function () { openFile(task, kind); });
+      saveBtn.addEventListener("click", function () { saveFile(task, kind, name); });
       files.appendChild(row);
     });
+  }
+
+  function openFile(task, kind) {
+    var desktop = global.Desktop;
+    if (desktop && desktop.available() && desktop.openTranslation) {
+      desktop.openTranslation(task.id, kind).catch(function () { showError(new Error(t("pdftr.open_failed"))); });
+      return;
+    }
+    global.open(fileUrl(task, kind), "_blank", "noopener");
+  }
+
+  function saveFile(task, kind, name) {
+    var desktop = global.Desktop;
+    if (desktop && desktop.available() && desktop.saveTranslation) {
+      desktop.saveTranslation(task.id, kind, name).catch(function () { showError(new Error(t("pdftr.save_failed"))); });
+      return;
+    }
+    fetch(fileUrl(task, kind)).then(function (resp) {
+      if (!resp.ok) throw new Error(t("pdftr.save_failed"));
+      return resp.blob();
+    }).then(function (blob) {
+      var objectUrl = URL.createObjectURL(blob);
+      var link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = name || (kind + ".pdf");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 1500);
+    }).catch(function (error) { showError(error); });
   }
 
   /** 切换阅读器里的 PDF 版本：original / dual / mono。 */

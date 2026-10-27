@@ -3,6 +3,16 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
+<script>
+(function () {
+  try {
+    var saved = localStorage.getItem("arxivreader.theme");
+    var theme = saved === "dark" || saved === "light" ? saved
+      : (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", theme);
+  } catch (e) {}
+})();
+</script>
 <meta content="width=device-width,initial-scale=1" name="viewport"/>
 <title data-i18n="ui.1eee4a3647db">ArxivReader · 阅读</title>
 <link href="/vendor/katex/katex.min.css" rel="stylesheet"/>
@@ -16,6 +26,7 @@
 <script src="/vendor/dompurify/purify.min.js"></script>
 <script src="/vendor/katex/katex.min.js"></script>
 <script src="/i18n.js"></script>
+<script src="/theme.js"></script>
 <script src="/desktop.js"></script>
 <script src="/renderer.js"></script>
 <script src="/reader.js"></script>

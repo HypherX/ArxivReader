@@ -3,6 +3,16 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
+<script>
+(function () {
+  try {
+    var saved = localStorage.getItem("arxivreader.theme");
+    var theme = saved === "dark" || saved === "light" ? saved
+      : (window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", theme);
+  } catch (e) {}
+})();
+</script>
 <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
 <title data-i18n="ui.f5337f637ed4">ArxivReader · 文献管理</title>
 <link href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;📚&lt;/text&gt;&lt;/svg&gt;" rel="icon"/>
@@ -29,6 +39,7 @@
 <button class="lt" data-i18n-title="ui.d6432698ed8a" data-pane="chat" title="对话栏"><span class="lt-ico">💬</span><span class="lt-label" data-i18n="ui.pane_chat">对话</span></button>
 </div>
 <div class="top-actions">
+<button class="ghost" id="theme-toggle" type="button">☀ 浅色</button>
 <select aria-label="输出语言" class="language-select" data-i18n-aria-label="ui.0703309cb1bb" data-i18n-title="ui.0703309cb1bb" id="output-language" title="输出语言"><option data-i18n="ui.72726d8818f6" value="zh">🌐 中文</option><option value="en">🌐 English</option></select>
 <button class="ghost" data-i18n="ui.a0ab5987d808" id="open-reviews">综述历史</button>
 
@@ -599,6 +610,7 @@
 <script src="/vendor/dompurify/purify.min.js"></script>
 <script src="/vendor/katex/katex.min.js"></script>
 <script src="/i18n.js"></script>
+<script src="/theme.js"></script>
 <script src="/desktop.js"></script>
 <script src="/renderer.js"></script>
 <script src="/pdf-find.js"></script>

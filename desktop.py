@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import socket
 import sqlite3
 import subprocess
@@ -239,11 +240,52 @@ class _Bridge:
                 self._window.destroy()
             elif action == "open_external":
                 external(str(payload.get("url", "")), ctx["origin"])
+            elif action == "save_translation":
+                src = _translation_file(ctx, payload)
+                name = _pdf_name(payload.get("name"), src.name)
+                selection = self._window.create_file_dialog(
+                    webview.FileDialog.SAVE, save_filename=name, file_types=("PDF (*.pdf)",))
+                if selection:
+                    dest = Path(selection if isinstance(selection, str) else selection[0])
+                    shutil.copyfile(src, dest)
+            elif action == "open_translation":
+                _open_file(_translation_file(ctx, payload))
             else:
                 raise ValueError("unknown_action")
             return {"ok": True}
         except Exception:
             return {"ok": False, "code": "desktop.failed"}
+
+
+def _pdf_name(name, fallback):
+    cleaned = re.sub(r"[^\w. -]", "_", str(name or fallback or "translation.pdf"))[:120].strip()
+    if not cleaned.lower().endswith(".pdf"):
+        cleaned += ".pdf"
+    return cleaned or "translation.pdf"
+
+
+def _translation_file(ctx, payload):
+    """只允许打开资料库 pdftranslate/output 里、数据库记下来的那一份译文。"""
+    kind = payload.get("kind")
+    raw_id = payload.get("task_id")
+    if kind not in ("mono", "dual") or isinstance(raw_id, bool) or not isinstance(raw_id, (int, float)):
+        raise ValueError("invalid_payload")
+    task_id = int(raw_id)
+    if task_id < 1 or task_id != raw_id:
+        raise ValueError("invalid_payload")
+    column = "mono_path" if kind == "mono" else "dual_path"
+    db_path = Path(ctx["data"]) / "library.db"
+    with sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True) as db:
+        row = db.execute("SELECT " + column + " FROM pdf_translation_tasks WHERE id = ?", (task_id,)).fetchone()
+    if not row or not row[0]:
+        raise ValueError("missing_file")
+    path = Path(row[0]).resolve()
+    root = (Path(ctx["data"]) / "pdftranslate" / "output").resolve()
+    if root != path and root not in path.parents:
+        raise ValueError("missing_file")
+    if not path.is_file():
+        raise ValueError("missing_file")
+    return path
 
 
 def _open_file(path):

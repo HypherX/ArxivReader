@@ -46,6 +46,42 @@
 .relation-node.selected rect { fill: #e3eaff; stroke: #405ed1; stroke-width: 2; }
 .relation-node text { fill: #314665; font: 12px system-ui; } .relation-edge { stroke: #bdc8d8; fill: none; stroke-width: 1.5; }
 .relation-edge.active { stroke: #536bcd; stroke-width: 3; }
+
+/* 深色下的阅读排版：正文、代码、公式、专注模式都要重新给对比度 */
+html[data-theme="dark"] .md { color: #f2f2f7; }
+html[data-theme="dark"] .md th,
+html[data-theme="dark"] .md td { border-color: #48484a; }
+html[data-theme="dark"] .md th { background: #2c2c2e; }
+html[data-theme="dark"] .md blockquote { border-left-color: #8d94ff; color: #e5e5ea; }
+html[data-theme="dark"] .md pre { background: #1c1c1e; color: #f2f2f7; border-color: #48484a; }
+html[data-theme="dark"] .md .math-error,
+html[data-theme="dark"] .math-warning { color: #ffd60a; }
+html[data-theme="dark"] .reading-toc { border-color: #48484a; }
+html[data-theme="dark"] .reading-focus #artifact-view {
+  background: #1c1c1e; border-color: #48484a; box-shadow: 0 0 0 100vmax #000000d0;
+}
+html[data-theme="dark"] .reading-focus #av-scroll { background: #1c1c1e; }
+html[data-theme="dark"] .reader-page { background: #1c1c1e; color: #f2f2f7; }
+html[data-theme="dark"] .reader-page header {
+  background: #2c2c2eee; border-bottom-color: #48484a; color: #f2f2f7;
+}
+html[data-theme="dark"] .reader-page header a { color: #c5c9ff; }
+html[data-theme="dark"] .reader-page article { background: #2c2c2e; border-color: #48484a; }
+html[data-theme="dark"] .reader-page #reader-meta { color: #aeaeb2; }
+html[data-theme="dark"] #review-form { background: #2c2c2e; }
+html[data-theme="dark"] .relation-card { background: #2c2c2e; border-color: #48484a; color: #f2f2f7; }
+html[data-theme="dark"] .relation-node text { fill: #f2f2f7; }
+html[data-theme="dark"] .relation-node.selected rect { fill: #3a3e6e; stroke: #8d94ff; }
+html[data-theme="dark"] .relation-edge { stroke: #6e6e76; }
+html[data-theme="dark"] .relation-edge.active { stroke: #a078f0; }
+html[data-theme="dark"] #folder-tree .folder-row::before { border-left-color: #48484a; }
+html[data-theme="dark"] .folder-icon { stroke: #c7c7cc; }
+html[data-theme="dark"] .folder-toggle { color: #aeaeb2; }
+html[data-theme="dark"] #folder-breadcrumb { color: #aeaeb2; }
+html[data-theme="dark"] .msg.user .md,
+html[data-theme="dark"] .msg.user .md a,
+html[data-theme="dark"] .msg.user .md pre,
+html[data-theme="dark"] .msg.user .md code { color: #fff; }
 .reasoning-body { white-space: normal; } .dlg-actions { flex-wrap: wrap; max-height: 45vh; overflow: auto; }
 #folder-tree .folder-row:hover .count { display: inline-block; }
 #av-version { max-width: 230px; }

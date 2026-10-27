@@ -363,9 +363,10 @@
     canvas.height = Math.floor(viewport.height * ratio);
     var layer = node("div", { class: "pv-textlayer" });
     // 重绘（缩放/旋转）前先清掉上一次留下的 canvas 与文字层，否则会叠出空白页
-    Array.prototype.forEach.call(record.box.querySelectorAll("canvas, .pv-textlayer"), function (old) { old.remove(); });
+    Array.prototype.forEach.call(record.box.querySelectorAll("canvas, .pv-textlayer, .pv-links"), function (old) { old.remove(); });
     record.box.insertBefore(canvas, record.box.firstChild);
     record.box.appendChild(layer);
+    buildLinkLayer(record, viewport);
     record.spans = null;
     record.textLayer = null;
     var task;
@@ -442,6 +443,68 @@
         if (state.query) highlight();
       });
     }).catch(function () { record.spans = []; });
+  }
+
+  /** 参考文献、目录、外链都是 PDF 的 Link 注释。文字层盖在画布上，不单独铺一层就点不到。 */
+  function safeHttp(url) {
+    return typeof url === "string" && /^https?:\/\//i.test(url);
+  }
+
+  function runNamedAction(action) {
+    var current = currentPage();
+    if (action === "NextPage") gotoPage(current + 1);
+    else if (action === "PrevPage") gotoPage(Math.max(1, current - 1));
+    else if (action === "FirstPage") gotoPage(1);
+    else if (action === "LastPage") gotoPage(state.pages.length);
+  }
+
+  function goToDest(dest) {
+    var doc = state.doc;
+    if (!doc || dest == null || dest === "") return;
+    var pending = typeof dest === "string" ? doc.getDestination(dest) : Promise.resolve(dest);
+    pending.then(function (explicit) {
+      if (!explicit || !explicit.length || !state.doc) return;
+      return state.doc.getPageIndex(explicit[0]).then(function (index) { gotoPage(index + 1); });
+    }).catch(function () {});
+  }
+
+  function buildLinkLayer(record, viewport) {
+    var layer = node("div", { class: "pv-links" });
+    record.box.appendChild(layer);
+    record.page.getAnnotations({ intent: "display" }).then(function (annots) {
+      if (!layer.isConnected || !annots) return;
+      annots.forEach(function (annot) {
+        if (!annot || annot.subtype !== "Link" || !annot.rect || annot.rect.length < 4) return;
+        var external = safeHttp(annot.url);
+        if (!external && annot.dest == null && !annot.action) return;
+        var rect = viewport.convertToViewportRectangle(annot.rect);
+        var left = Math.min(rect[0], rect[2]);
+        var top = Math.min(rect[1], rect[3]);
+        var width = Math.abs(rect[2] - rect[0]);
+        var height = Math.abs(rect[3] - rect[1]);
+        if (width < 1 || height < 1) return;
+        var link = node("a", {
+          class: "pv-link",
+          href: external ? annot.url : "#",
+          title: external ? annot.url : global.I18n.t("pdf.link_internal"),
+        });
+        if (external) {
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+        }
+        link.style.left = left + "px";
+        link.style.top = top + "px";
+        link.style.width = width + "px";
+        link.style.height = height + "px";
+        link.addEventListener("click", function (event) {
+          if (external) return;
+          event.preventDefault();
+          if (annot.action) runNamedAction(annot.action);
+          else goToDest(annot.dest);
+        });
+        layer.appendChild(link);
+      });
+    }).catch(function () {});
   }
 
   // ---------------------------------------------------------------- 全文检索

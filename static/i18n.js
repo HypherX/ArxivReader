@@ -736,7 +736,14 @@
     "tool.fetch_web_page": ["抓取网页", "Fetch web page"],
     "tool.search_library": ["检索本地文库", "Search library"],
     "tool.related_papers": ["查看关联论文", "Related papers"],
-    "tool.find_in_paper": ["在本文中定位", "Find in this paper"]
+    "tool.find_in_paper": ["在本文中定位", "Find in this paper"],
+    "theme.light": ["浅色", "Light"],
+    "theme.dark": ["深色", "Dark"],
+    "theme.to_light": ["切换到浅色", "Switch to light appearance"],
+    "theme.to_dark": ["切换到深色", "Switch to dark appearance"],
+    "pdf.link_internal": ["跳转到文内位置", "Go to this place in the document"],
+    "pdftr.open_failed": ["打不开译文文件", "Couldn't open the translated PDF"],
+    "pdftr.save_failed": ["下载译文失败", "Couldn't download the translated PDF"]
   };
   Object.keys(extra).forEach(function (key) { MESSAGES[key] = extra[key]; });
   var language = "zh", bindings = new Map(), channel;

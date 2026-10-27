@@ -2285,20 +2285,85 @@
     }
     if (sessionId) chatLive[sessionId] = { paperId: paperId, followKind: followKind, ensure: ensure };
     function stillHere() { return visible(); }
-    function finish(aborted) {
-      if (sessionId && chatLive[sessionId] && chatLive[sessionId].ensure === ensure) delete chatLive[sessionId];
+    // 切走窗口时合成层可能把正在长的气泡画丢。回来时用内存里的原文再铺一次。
+    var stopPaint = watchLivePaint(function () {
+      if (!visible()) return;
+      var box = followKind ? $("follow-messages") : $("messages");
+      if (ui.ai && box && box.contains(ui.ai)) {
+        if (ui.raw && ui.answer) setMd(ui.answer, ui.raw, true);
+        if (ui.rawReasoning && ui.reasonBlock) renderReasoning(ui.reasonBlock, ui.rawReasoning, true);
+        ui.ai.style.animation = "none";
+        ui.ai.style.opacity = "1";
+        void ui.ai.offsetHeight;
+      } else {
+        ensure();
+      }
+    });
+    function plain(text) {
+      return String(text || "").replace(/[#>*_`\[\]()!-]/g, "").replace(/\s+/g, "");
+    }
+    function reloadThread() {
+      if (followKind) {
+        if (document.querySelector("#follow-messages .msg-edit")) return null;
+        if (artifactView === followKind) return loadFollowThread(followKind, true);
+        return null;
+      }
+      if (document.querySelector("#messages .msg-edit")) return null;
+      loadSessions(true);
+      return loadChatMessages();
+    }
+    // 连接在后台被掐掉时，服务端可能还没把半截回复写完。重新拉历史若比内存里的短，就把内存里的铺回去。
+    function keepBufferIfMissing() {
+      if (!stillHere() || !ui.raw) return;
+      var box = followKind ? $("follow-messages") : $("messages");
+      if (!box) return;
+      var sample = plain(ui.raw).slice(0, 60);
+      var have = plain(box.textContent);
+      if (sample && have.indexOf(sample) >= 0) return;
+      var bodies = box.querySelectorAll(".msg.assistant .msg-body");
+      var last = bodies[bodies.length - 1];
+      if (last && plain(last.textContent).length < sample.length) {
+        var stale = last.closest(".msg");
+        if (stale) stale.remove();
+      }
+      ui.ai = null;
+      ui.answer = null;
+      ui.reasonBlock = null;
+      ensure();
+      if (ui.ai) ui.ai.classList.remove("pending");
+    }
+    var settled = false;
+    function settle(opts) {
+      if (settled) return;
+      settled = true;
+      stopPaint();
+      opts = opts || {};
       if (ui.ai) ui.ai.classList.remove("pending");
       syncStreaming();
-      if (!stillHere()) return;
-      if (aborted) toast(function () { return I18n.t("ui.459a568188e8"); }, "warn", 5000);
-      if (followKind) {
-        if (document.querySelector("#follow-messages .msg-edit")) return;
-        if (artifactView === followKind) loadFollowThread(followKind, true);
+      function run() {
+        if (sessionId && chatLive[sessionId] && chatLive[sessionId].ensure === ensure) delete chatLive[sessionId];
+        if (!stillHere()) return;
+        if (opts.aborted) toast(function () { return I18n.t("ui.459a568188e8"); }, "warn", 5000);
+        if (opts.failed) toast(function () { return I18n.t("ui.cfa7c64f924a") + I18n.value(opts.failed); }, "err");
+        var trusted = opts.payload && typeof opts.payload.full_text === "string";
+        var task = reloadThread();
+        if (trusted) return;
+        if (task && task.then) task.then(keepBufferIfMissing, keepBufferIfMissing);
+        else keepBufferIfMissing();
+      }
+      // 页面藏着时不要立刻用历史消息替换气泡：历史可能还是空的，回来就只剩一块空白。
+      if (document.visibilityState === "hidden") {
+        function onShow() {
+          if (document.visibilityState === "hidden") return;
+          document.removeEventListener("visibilitychange", onShow);
+          window.removeEventListener("focus", onShow);
+          run();
+        }
+        document.addEventListener("visibilitychange", onShow);
+        window.addEventListener("focus", onShow);
         return;
       }
-      if (document.querySelector("#messages .msg-edit")) return;
-      loadSessions(true);
-      loadChatMessages();
+      run();
     }
     ensure();
     streamSSE(url, payload, {
@@ -2320,7 +2385,7 @@
         if (delta) setMd(ui.answer, ui.raw, true);
         if (nearBottom) requestAnimationFrame(function () { scroller.scrollTop = scroller.scrollHeight; });
       },
-      onDone: function () { finish(false); },
+      onDone: function (payload) { settle({ payload: payload }); },
       onTool: function (t) {
         // agent 工具调用过程：每条完成一个就挂一个 chip，让联网检索等动作可见
         if (!ensure()) return;
@@ -2333,22 +2398,9 @@
         var scroller = threadScroller(box);
         requestAnimationFrame(function () { scroller.scrollTop = scroller.scrollHeight; });
       },
-      onCancelled: function () { finish(true); },
-      onAborted: function () { finish(true); },
-      onError: function (errMsg) {
-        if (sessionId && chatLive[sessionId] && chatLive[sessionId].ensure === ensure) delete chatLive[sessionId];
-        if (ui.ai) ui.ai.classList.remove("pending");
-        syncStreaming();
-        if (!stillHere()) return;
-        toast(function () { return I18n.t("ui.cfa7c64f924a") + I18n.value(errMsg); }, "err");
-        if (followKind) {
-          if (artifactView === followKind && !document.querySelector("#follow-messages .msg-edit")) loadFollowThread(followKind, true);
-          return;
-        }
-        if (document.querySelector("#messages .msg-edit")) return;
-        loadSessions(true);
-        loadChatMessages();
-      },
+      onCancelled: function () { settle({ aborted: true }); },
+      onAborted: function () { settle({ aborted: true }); },
+      onError: function (errMsg) { settle({ failed: errMsg }); },
     });
     syncStreaming();
   }
@@ -2409,6 +2461,18 @@
   // 所以统一先调 POST /api/cancel/{token} 置位服务端标记，再 abort 掉前端连接。
   var liveStreams = [];          // 可以并行。换论文不会把它们从这里摘掉
   var chatLive = {};             // sessionId -> 还在生成的那条回复，切回来时再画上
+  var livePaints = [];           // 生成过程中切到别的窗口再回来，把还在内存里的正文重新画上
+  function watchLivePaint(fn) {
+    livePaints.push(fn);
+    return function () { livePaints = livePaints.filter(function (item) { return item !== fn; }); };
+  }
+  function repaintLiveThreads() {
+    livePaints.slice().forEach(function (fn) { try { fn(); } catch (e) { /* 一条失败不影响其它 */ } });
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") repaintLiveThreads();
+  });
+  window.addEventListener("focus", repaintLiveThreads);
   var dropSend = {};             // paperId -> 发送按钮在请求发出前被按成了停止
 
   function newToken() {
@@ -2558,6 +2622,13 @@
     var answer = el("div", { class: "answer" }); ai.appendChild(answer);
     box.appendChild(ai); box.scrollTop = box.scrollHeight;
     var raw = "", rawReasoning = "", block = null;
+    var stopSkillPaint = watchLivePaint(function () {
+      if (!box.contains(ai)) return;
+      if (raw) setMd(answer, raw, true);
+      ai.style.animation = "none";
+      ai.style.opacity = "1";
+      void ai.offsetHeight;
+    });
     return streamSSE("/api/papers/" + paper.id + "/skills/" + skillName + "?stream=true", {},
       {
         kind: "skill",
@@ -2574,6 +2645,7 @@
           if (nearBottom) requestAnimationFrame(function () { box.scrollTop = box.scrollHeight; });
         },
         onDone: function (payload) {
+          stopSkillPaint();
           if (box.contains(ai)) {
             ai.classList.remove("pending");
             setMd(answer, raw || (payload && payload.output) || "");
@@ -2583,6 +2655,7 @@
           toast(function () { return I18n.t("ui.5f0394777472") + skillName; }, "info");
         },
         onError: function (msg) {
+          stopSkillPaint();
           if (box.contains(ai)) {
             ai.classList.remove("pending");
             box.appendChild(el("div", { class: "msg error", text: function () { return I18n.t("ui.b915bde73559") + I18n.value(msg); } }));
@@ -3667,6 +3740,7 @@
       if (state.outputLanguage !== event.detail) applyLanguage(event.detail);
     });
     ReaderPreferences.init().then(function () {
+      if (window.Theme) Theme.sync(ReaderPreferences.getItem("theme"));
       state.sortBy = ReaderPreferences.getItem("paper_sort") || "added_desc";
       $("paper-sort").value = state.sortBy;
       applyWidths(); applyVisibility();

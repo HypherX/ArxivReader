@@ -40,8 +40,20 @@
     if (available()) return call("quit_app");
     return Promise.reject(new Error(I18n.t("update.dev_mode")));
   }
+  function translationPayload(taskId, kind, name) {
+    return { task_id: Number(taskId), kind: kind, name: name || "" };
+  }
+  function saveTranslation(taskId, kind, name) {
+    if (!available()) return Promise.reject(new Error(I18n.t("pdftr.save_failed")));
+    return call("save_translation", translationPayload(taskId, kind, name));
+  }
+  function openTranslation(taskId, kind) {
+    if (!available()) return Promise.reject(new Error(I18n.t("pdftr.open_failed")));
+    return call("open_translation", translationPayload(taskId, kind));
+  }
   global.Desktop = { available: available, saveMarkdown: saveMarkdown, copy: copy,
-    storageInfo: storageInfo, openReader: openReader, quit: quit };
+    storageInfo: storageInfo, openReader: openReader, quit: quit,
+    saveTranslation: saveTranslation, openTranslation: openTranslation };
   function bindStorage() {
     storageInfo().catch(function () {});
     var open = document.getElementById("storage-open"), select = document.getElementById("storage-select");
