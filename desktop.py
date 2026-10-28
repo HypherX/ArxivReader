@@ -58,6 +58,13 @@ def _backend(pipe, data_dir, ticket, cookie):
         server.run(sockets=[sock])
     except Exception:
         try:
+            import traceback
+            # 后端启动失败此前没有任何落盘线索，排障只能靠猜；写入数据目录便于定位
+            from pathlib import Path as _P
+            (_P(data_dir) / "backend-error.log").write_text(traceback.format_exc(), encoding="utf-8")
+        except Exception:
+            pass
+        try:
             pipe.send({"ok": False, "code": "desktop.failed"})
         except (EOFError, OSError):
             pass
@@ -376,6 +383,11 @@ def main():
             parent.close()
         if instance is not None:
             instance.close()
+        # 必须绕开正常的解释器退出：实测（v1.1.2 采样）主进程会在 Py_FinalizeEx
+        # 等待一个常驻 Python 线程（锁等待）而永不退出——关窗后进程僵死，
+        # 自更新换包脚本也因此等不到主进程退出而整轮放弃。后端已 join、
+        # 单实例锁已释放，到这里直接 os._exit 是安全的。
+        os._exit(0)
 
 
 if __name__ == "__main__":

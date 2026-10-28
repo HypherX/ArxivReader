@@ -323,25 +323,43 @@ _APPLY_SCRIPT = """#!/bin/bash
 # ArxivReader 自更新换包：$1=主进程PID $2=.app路径 $3=安装包zip $4=工作目录
 set -u
 PID="$1"; APP="$2"; ZIP="$3"; WORK="$4"
-for _ in $(seq 1 400); do
+echo "[$(date '+%H:%M:%S')] 等待主进程 $PID 退出后替换 $APP"
+for _ in $(seq 1 200); do
   kill -0 "$PID" 2>/dev/null || break
   sleep 0.25
 done
-kill -0 "$PID" 2>/dev/null && exit 1            # 100 秒还没退出，放弃
+# v1.1.3 及更早版本的主进程退出时会卡在 Py_FinalizeEx（等待常驻线程），永远退不完；
+# 等不到就主动终结。quit_app 流程已先销毁窗口并关闭后端，残留的只是一个卡在
+# 解释器退出阶段的空壳，终结它不会丢数据。
+if kill -0 "$PID" 2>/dev/null; then
+  echo "[$(date '+%H:%M:%S')] 主进程 50s 未退出，发送 TERM（含残留后端子进程）"
+  pkill -TERM -P "$PID" 2>/dev/null
+  kill -TERM "$PID" 2>/dev/null
+  sleep 3
+fi
+if kill -0 "$PID" 2>/dev/null; then
+  echo "[$(date '+%H:%M:%S')] 主进程仍未退出，发送 KILL"
+  kill -KILL "$PID" 2>/dev/null
+  sleep 1
+fi
+kill -0 "$PID" 2>/dev/null && { echo "主进程无法终结，放弃换包"; exit 1; }
+echo "[$(date '+%H:%M:%S')] 解包 $ZIP"
 EXTRACT="$WORK/extract"
 rm -rf "$EXTRACT"; mkdir -p "$EXTRACT"
-/usr/bin/ditto -x -k "$ZIP" "$EXTRACT" || exit 1
+/usr/bin/ditto -x -k "$ZIP" "$EXTRACT" || { echo "ditto 解包失败"; exit 1; }
 NEWAPP="$EXTRACT/ArxivReader.app"
-[ -d "$NEWAPP" ] || exit 1
+[ -d "$NEWAPP" ] || { echo "包内没有 ArxivReader.app"; exit 1; }
 BACKUP="$WORK/ArxivReader-old.app"
 rm -rf "$BACKUP"
-mv "$APP" "$BACKUP" || exit 1
+mv "$APP" "$BACKUP" || { echo "旧版本移出失败"; exit 1; }
 if mv "$NEWAPP" "$APP"; then
   /usr/bin/xattr -dr com.apple.quarantine "$APP" 2>/dev/null
+  echo "[$(date '+%H:%M:%S')] 换包完成，重新打开 $APP"
   /usr/bin/open "$APP"
   rm -f "$ZIP"
 else
   mv "$BACKUP" "$APP"                          # 换包失败，回滚旧版本
+  echo "新版本落位失败，已回滚旧版本"
   exit 1
 fi
 """
