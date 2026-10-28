@@ -283,6 +283,7 @@
       row.addEventListener("click", function () { selectFolder(n.id); });
       row.addEventListener("keydown", function (e) { if (e.key === "Enter") selectFolder(n.id); });
       row.addEventListener("contextmenu", function (e) { e.preventDefault(); openCtxMenu(e, n); });
+      bindPdfDropTarget(row, function () { return n.id; }, true);
       frag.appendChild(row);
       if (children.length && (!collapsed || state.folderSearch)) frag.appendChild(buildTree(children, depth + 1));
     });
@@ -402,6 +403,8 @@
   }
   function selectFolder(id) {
     state.selectedFolderId = id;
+    // 添加链接和上传 PDF 的默认落点始终跟随当前目录，避免误加到「全部论文」。
+    $("target-folder").value = id !== null ? String(id) : "";
     if (id !== null) ensurePane("list");   // 点文件夹自动展开列表栏
     $("folder-all").classList.toggle("selected", id === null);
     $("folder-scope").classList.toggle("hidden", id === null);
@@ -1981,16 +1984,15 @@
       .then(function () { btn.disabled = false; I18n.bind(btn, function () { return I18n.t("ui.7a8a11ead507"); }); });
   }
 
-  // 上传本地 PDF：multipart 表单直连，复用目标文件夹下拉的选择
-  function uploadPdf(file) {
-    if (!file) return;
-    var btn = $("upload-btn"); btn.disabled = true;
-    I18n.bind(btn, function () { return I18n.t("ui.9a4c1e7fb205"); });
+  // 上传本地 PDF：按钮与拖拽共用串行队列，目标文件夹在入队时固定，避免上传途中切换目录导致落点漂移。
+  var uploadQueue = Promise.resolve(), pendingUploads = 0;
+  function uploadPdf(file, folderId) {
+    if (!file) return Promise.resolve(null);
     var fd = new FormData();
     fd.append("file", file);
-    var folderVal = $("target-folder").value;
+    var folderVal = folderId === undefined ? $("target-folder").value : (folderId === null ? "" : String(folderId));
     if (folderVal) fd.append("folder_id", folderVal);
-    fetch("/api/papers/upload", { method: "POST", body: fd }).then(function (r) {
+    return fetch("/api/papers/upload", { method: "POST", body: fd }).then(function (r) {
       return r.text().then(function (txt) {
         var data = txt ? JSON.parse(txt) : null;
         if (!r.ok) throw I18n.apiError(data, r.status);
@@ -1998,9 +2000,76 @@
       });
     }).then(function (paper) {
       toast(function () { return I18n.t("ui.240b9846ec24") + (paper.title || paper.arxiv_id); }, "ok");
-      return Promise.all([loadFolders(), loadPapers()]).then(function () { selectPaper(paper); });
-    }).catch(function (e) { toast(function () { return I18n.t("ui.bfabc7837ea6") + e.message; }, "err"); })
-      .then(function () { btn.disabled = false; I18n.bind(btn, function () { return I18n.t("ui.1c7f3a9bd2e4"); }); });
+      return paper;
+    }).catch(function (e) {
+      toast(function () { return I18n.t("ui.bfabc7837ea6") + e.message; }, "err");
+      return null;   // 单个失败不阻断同批后续文件
+    });
+  }
+  function queuePdfUploads(files, folderId, revealFolder) {
+    var batch = Array.prototype.slice.call(files || []).filter(function (f) { return !!f; });
+    if (!batch.length) return uploadQueue;
+    var btn = $("upload-btn");
+    pendingUploads += batch.length;
+    btn.disabled = true;
+    I18n.bind(btn, function () { return I18n.t("ui.9a4c1e7fb205"); });
+    var run = uploadQueue.then(function () {
+      var lastPaper = null, chain = Promise.resolve();
+      batch.forEach(function (file) {
+        chain = chain.then(function () {
+          return uploadPdf(file, folderId).then(function (paper) { if (paper) lastPaper = paper; });
+        });
+      });
+      return chain.then(function () {
+        return Promise.all([loadFolders(), loadPapers()]).then(function () {
+          if (revealFolder) selectFolder(folderId === undefined ? state.selectedFolderId : folderId);
+          if (lastPaper) selectPaper(lastPaper);
+        });
+      });
+    });
+    uploadQueue = run.catch(function (e) { toast(function () { return e.message; }, "err"); }).then(function () {
+      pendingUploads -= batch.length;
+      if (!pendingUploads) {
+        btn.disabled = false;
+        I18n.bind(btn, function () { return I18n.t("ui.1c7f3a9bd2e4"); });
+      }
+    });
+    return uploadQueue;
+  }
+  function draggedFiles(e) {
+    var types = e.dataTransfer && e.dataTransfer.types;
+    return !!types && Array.prototype.indexOf.call(types, "Files") >= 0;
+  }
+  function pdfFiles(files) {
+    return Array.prototype.slice.call(files || []).filter(function (f) {
+      return /\.pdf$/i.test(f.name || "") || f.type === "application/pdf";
+    });
+  }
+  function bindPdfDropTarget(target, getFolderId, revealFolder) {
+    var depth = 0;
+    target.addEventListener("dragenter", function (e) {
+      if (!draggedFiles(e)) return;
+      e.preventDefault(); depth++; target.classList.add("pdf-drop-active");
+    });
+    target.addEventListener("dragover", function (e) {
+      if (!draggedFiles(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      target.classList.add("pdf-drop-active");
+    });
+    target.addEventListener("dragleave", function () {
+      depth = Math.max(0, depth - 1);
+      if (!depth) target.classList.remove("pdf-drop-active");
+    });
+    target.addEventListener("drop", function (e) {
+      if (!draggedFiles(e)) return;
+      e.preventDefault(); e.stopPropagation(); depth = 0;
+      target.classList.remove("pdf-drop-active");
+      var files = pdfFiles(e.dataTransfer.files);
+      if (!files.length) { toast(function () { return I18n.t("ui.d28f0a6c4101"); }, "err"); return; }
+      if (files.length < e.dataTransfer.files.length) toast(function () { return I18n.t("ui.d28f0a6c4102"); });
+      queuePdfUploads(files, getFolderId(), revealFolder);
+    });
   }
 
   // ---------------- 论文操作：移动 / 删除 / 重抽全文 ----------------
@@ -3378,11 +3447,21 @@
     $("new-url").addEventListener("keyup", function (e) { if (e.key === "Enter") addPaper(); });
     $("upload-btn").addEventListener("click", function () { $("pdf-upload-input").click(); });
     $("pdf-upload-input").addEventListener("change", function (e) {
-      var f = e.target.files && e.target.files[0];
+      var files = e.target.files;
       e.target.value = "";   // 允许连续选择同一文件（后端会对重复内容报 409）
-      uploadPdf(f);
+      queuePdfUploads(files && [files[0]]);
     });
     $("folder-all").addEventListener("click", function () { selectFolder(null); });
+    bindPdfDropTarget($("folder-all"), function () { return null; }, true);
+    bindPdfDropTarget($("paper-list"), function () { return state.selectedFolderId; }, false);
+    // WKWebView/浏览器默认会把拖入的 PDF 当导航打开，非放置区也必须拦住。
+    document.addEventListener("dragover", function (e) { if (draggedFiles(e)) e.preventDefault(); });
+    document.addEventListener("drop", function (e) {
+      if (draggedFiles(e)) e.preventDefault();
+      Array.prototype.forEach.call(document.querySelectorAll(".pdf-drop-active"), function (node) {
+        node.classList.remove("pdf-drop-active");
+      });
+    });
     $("new-folder").addEventListener("click", function () {
       askText(function () { return I18n.t("ui.fb641318480e"); }, "", function () { return I18n.t("ui.7d24c4ee6a1f"); }).then(function (name) {
         if (!name) return null;
