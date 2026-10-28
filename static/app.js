@@ -3447,9 +3447,10 @@
     $("new-url").addEventListener("keyup", function (e) { if (e.key === "Enter") addPaper(); });
     $("upload-btn").addEventListener("click", function () { $("pdf-upload-input").click(); });
     $("pdf-upload-input").addEventListener("change", function (e) {
-      var files = e.target.files;
+      // FileList 是实时对象：先复制再清空选择框，否则批量文件会随清空而丢失。
+      var files = Array.prototype.slice.call(e.target.files || []);
       e.target.value = "";   // 允许连续选择同一文件（后端会对重复内容报 409）
-      queuePdfUploads(files && [files[0]]);
+      queuePdfUploads(files);
     });
     $("folder-all").addEventListener("click", function () { selectFolder(null); });
     bindPdfDropTarget($("folder-all"), function () { return null; }, true);
